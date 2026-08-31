@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Goldens e fixtures são comparados byte a byte pelos testes. Sem esta regra o
+# checkout no Windows os converte para CRLF, o golden test quebra localmente e
+# continua verde na CI (Linux) — o pior tipo de falha.
+**/testdata/** -text

@@ -110,6 +110,54 @@ decisão, não como trabalho previsto.
 
 ---
 
+### B7 — Empacotamento em container para servidor · impacto médio · esforço baixo
+
+**Problema.** Hoje o binário é instalado à mão em cada máquina. Um servidor
+caseiro sempre ligado é melhor host que um notebook — cobre reboot, atualização
+e falha de hardware, que é o que a redundância entre máquinas realmente resolve.
+Só falta empacotamento.
+
+**Contexto.** O projeto já containeriza bem: Go puro, `CGO_ENABLED=0`, e a CI já
+compila `linux/amd64` exatamente nessas condições. O trabalho é quase todo de
+configuração, não de código.
+
+**Premissa que não pode ser violada.** Container **não** muda o IP de saída: no
+servidor de casa continua sendo o IP residencial, que era o ponto de partida do
+projeto. O que quebraria isso é rodar num VPS. E vários containers no mesmo host
+não são várias máquinas — mesma origem, nenhuma redundância. Continua valendo
+**um pareamento por máquina física**.
+
+**Decisões já tomadas** (ver a seção Docker do README, escrita antes desta
+implementação):
+
+1. Backend `rclone`, não `folder`: não há cliente do Drive dentro do container.
+2. `host_id` explícito no config — o fallback é o hostname, e hostname de
+   container muda a cada recriação, gerando shard órfão a cada `up`.
+3. Imagem com tzdata (ou `import _ "time/tzdata"`): o digest renderiza em
+   `time.Local` e container sem tzdata é UTC. **O golden test não pega isso**,
+   porque usa UTC de propósito.
+4. Volume nomeado em disco local para `session.db` e `messages.db`. Nunca em
+   NFS/SMB: o SQLite usa WAL e corrompe sobre rede.
+5. `stop_grace_period: 90s` — o ciclo final no shutdown tem timeout de 60s e o
+   Docker mata em 10s por padrão. Não corrompe (a escrita é atômica), mas o
+   último ciclo se perde.
+
+**Escopo.** Dockerfile multi-stage (build estático + base mínima com tzdata e
+rclone), `docker-compose.yml` de exemplo, e `linux/arm64` na matriz da CI — hoje
+só há `linux/amd64`, e Raspberry Pi é um alvo provável.
+
+**Cuidado.** `restart: unless-stopped` não resolve sessão derrubada: o `run`
+hoje não sai com código diferente de zero quando o WhatsApp desvincula o
+aparelho. Sem **B5**, o container fica de pé sem capturar nada. Fazer B5 antes,
+ou junto.
+
+**Alternativa que pode ser melhor.** Se o servidor for Linux, um serviço systemd
+evita de saída as decisões 2, 3 e 4 — o binário é estático de qualquer jeito.
+Docker ganha se você quiser empacotar o rclone junto ou distribuir para
+dispositivos heterogêneos. Avaliar antes de executar.
+
+---
+
 ## Descartados
 
 | Ideia | Por quê |

@@ -301,6 +301,114 @@ systemctl --user enable --now wappsync
 
 ---
 
+## Rodar em Docker
+
+> **Estado:** a imagem ainda não existe. Esta seção são as decisões de projeto,
+> escritas antes da implementação — ver **B7** em
+> [PLANO-APRIMORAMENTOS.md](PLANO-APRIMORAMENTOS.md). O `compose` abaixo é um
+> ponto de partida, não algo já validado.
+
+O projeto containeriza bem: Go puro com `CGO_ENABLED=0` (o driver SQLite é
+`modernc.org/sqlite`), o que dá um binário estático. A CI já compila
+`linux/amd64` exatamente nessas condições.
+
+Um servidor de casa é, na verdade, o **melhor** host: fica sempre ligado, que é
+justamente o ponto fraco de um notebook.
+
+### O IP continua sendo o seu
+
+O Docker faz NAT pela rede do host, então no servidor de casa a saída é o mesmo
+IP residencial dos seus outros computadores. A premissa do projeto continua de
+pé. Duas coisas a quebrariam:
+
+- **Rodar num VPS** (Hetzner, DO, AWS): IP de datacenter, exatamente o que este
+  desenho evita. Container não muda isso.
+- **Vários containers no mesmo host**: são três aparelhos vinculados saindo da
+  mesma origem. Não dá redundância nenhuma — uma falha do host derruba os três —
+  e provavelmente chama mais atenção, não menos. Continua valendo **um
+  pareamento por máquina física**.
+
+### Seis armadilhas
+
+**1. O backend padrão não serve.** `folder` pressupõe o app do Google Drive
+sincronizando uma pasta local, que não existe dentro do container. Ou você monta
+a pasta sincronizada do host, ou usa `backend = "rclone"` — que é o encaixe
+natural aqui, com o `rclone.conf` montado como secret.
+
+**2. Defina `host_id` explicitamente.** Quando vazio, ele cai no hostname — e
+hostname de container é o ID, que muda a cada recriação. O resultado seria um
+shard novo na nuvem a cada `docker compose up --force-recreate`, acumulando
+arquivos órfãos. É a pegadinha mais fácil de não perceber.
+
+**3. Fuso horário.** O digest é renderizado em `time.Local`, e container sem
+tzdata é UTC — seu briefing mostraria 09:12 para uma mensagem das 06:12.
+Precisa de `TZ=America/Sao_Paulo` **e** tzdata presente; numa imagem `scratch`
+não há, então use uma base que tenha, ou embuta com `import _ "time/tzdata"`.
+Os testes não pegam isso: o golden usa UTC de propósito.
+
+**4. Volume persistente é obrigatório.** `session.db` é credencial. Sem volume,
+todo restart perde o pareamento e queima mais um dos ~4 slots de aparelho
+vinculado do WhatsApp. `messages.db` também: sem ele some a auto-recuperação do
+shard descrita em [Anti-sobrescrita](#anti-sobrescrita).
+
+**5. SQLite não pode ficar em share de rede.** O banco usa WAL, e WAL sobre
+NFS/SMB corrompe. Em servidor caseiro é comum montar um NAS — aqui não dá. Disco
+local ou volume nomeado. É a mesma lógica da validação que já existe no config
+(`data_dir` não pode estar dentro da pasta sincronizada), estendida.
+
+**6. `stop_grace_period`.** O ciclo final no shutdown tem timeout de 60s e o
+Docker mata em 10s por padrão. Não corrompe nada — a escrita é atômica por
+temp + rename — mas você perde o último ciclo.
+
+### Esqueleto de compose
+
+```yaml
+services:
+  wappsync:
+    build: .
+    container_name: wappsync
+    restart: unless-stopped
+    stop_grace_period: 90s
+    environment:
+      TZ: America/Sao_Paulo
+    volumes:
+      - wappsync-data:/data                                   # disco local, nunca NAS
+      - ./config.toml:/etc/wappsync/config.toml:ro
+      - ./rclone.conf:/root/.config/rclone/rclone.conf:ro
+    command: ["run", "-config", "/etc/wappsync/config.toml"]
+
+volumes:
+  wappsync-data:
+```
+
+Com `host_id = "servidor-casa"`, `[paths].data_dir = "/data"` e
+`[remote].backend = "rclone"` no `config.toml`.
+
+O `login` é interativo uma única vez, porque precisa exibir o QR:
+
+```bash
+docker compose run --rm -it wappsync login -config /etc/wappsync/config.toml
+```
+
+Se o QR não renderizar bem, pareie por número com `-phone +5511999999999`.
+Depois disso o `run` é daemon puro.
+
+> `restart: unless-stopped` **não** cobre sessão derrubada: hoje o `run` não sai
+> com código diferente de zero quando o WhatsApp desvincula o aparelho, então o
+> container fica de pé sem capturar nada. É o item **B5** do plano.
+
+### Talvez você não precise de Docker
+
+Se o servidor for Linux, um serviço systemd é mais simples e evita de saída as
+armadilhas 2, 3 e 4 — o binário é estático de qualquer forma. O Docker ganha se
+você quiser empacotar o rclone junto, ou distribuir para vários dispositivos
+heterogêneos.
+
+Para ARM (Raspberry Pi e afins) falta adicionar `linux/arm64` à matriz da CI;
+hoje ela cobre só `linux/amd64`.
+
+---
+
 ## Riscos e limites
 
 **Termos de uso.** O WhatsApp não oferece API de cliente para uso pessoal e os

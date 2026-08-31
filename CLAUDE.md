@@ -68,6 +68,11 @@ go test ./internal/export/ -run TestDigestGolden -update   # regravar o golden
   `git status` antes de commitar — 27 MB já escaparam uma vez.
 - **`.gitignore` ignora `*.jsonl`**, com exceção de `**/testdata/**`. Fixture nova
   fora de `testdata/` some sem aviso.
+- **Fim de linha em `testdata/`.** O `.gitattributes` tem `* text=auto`, que no
+  Windows converte para CRLF no checkout; os goldens são comparados byte a byte,
+  então quebrariam localmente e continuariam **verdes na CI** (Linux). A regra
+  `**/testdata/** -text` neutraliza isso. Fixture nova fora de `testdata/`
+  precisa da mesma proteção.
 - **Nada de banco, sessão ou `config.toml` real versionado.**
 
 ## O que não é testável
