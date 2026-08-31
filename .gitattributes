@@ -5,3 +5,7 @@
 # checkout no Windows os converte para CRLF, o golden test quebra localmente e
 # continua verde na CI (Linux) — o pior tipo de falha.
 **/testdata/** -text
+
+# Fontes Go sempre em LF: o gofmt normaliza para LF, então CRLF na árvore de
+# trabalho faria `gofmt -l .` listar o repositório inteiro no Windows.
+*.go text eol=lf

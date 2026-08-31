@@ -67,22 +67,20 @@ go test ./internal/export/ -run TestDigestGolden -update   # regravar o golden
 - **`-race` não roda aqui**: exige cgo, e não há gcc. É o motivo principal da CI
   existir. `handleEvent` roda nas goroutines do whatsmeow em paralelo com o ciclo
   de export, então corrida é risco concreto.
-- **`gofmt -l .` lista *todos* os arquivos nesta máquina, sempre.** O
-  `.gitattributes` tem `* text=auto`, o checkout no Windows é CRLF e o gofmt quer
-  LF — a saída é ruído, não erro de formatação. Para o veredito real, normalize
-  antes: copie para uma árvore temporária com `sed 's/\r$//'` e rode o gofmt lá.
-  Quem dá o veredito de verdade é a CI, que roda em Linux com LF.
 - **Go 1.26+ obrigatório** (exigência do whatsmeow). Driver SQLite puro Go
   (`modernc.org/sqlite`): nenhum compilador C deve virar dependência.
 - **O linker deixa `.exe~`**; já coberto pelo `.gitignore`, mas confira
   `git status` antes de commitar — 27 MB já escaparam uma vez.
 - **`.gitignore` ignora `*.jsonl`**, com exceção de `**/testdata/**`. Fixture nova
   fora de `testdata/` some sem aviso.
-- **Fim de linha em `testdata/`.** O `.gitattributes` tem `* text=auto`, que no
-  Windows converte para CRLF no checkout; os goldens são comparados byte a byte,
-  então quebrariam localmente e continuariam **verdes na CI** (Linux). A regra
-  `**/testdata/** -text` neutraliza isso. Fixture nova fora de `testdata/`
-  precisa da mesma proteção.
+- **Fim de linha.** O `.gitattributes` tem `* text=auto`, que no Windows converte
+  para CRLF no checkout. Isso já quebrou duas coisas, e as duas estão corrigidas
+  na raiz — mas fixture nova **fora** de `testdata/` precisa da mesma proteção:
+  - `*.go text eol=lf` — sem isso o gofmt (que normaliza para LF) passa a listar
+    o repositório inteiro depois de qualquer checkout, e `gofmt -l .` vira ruído.
+  - `**/testdata/** -text` — goldens são comparados byte a byte; com CRLF eles
+    quebram localmente e continuam **verdes na CI** (Linux), que é o pior modo
+    de falha possível.
 - **Nada de banco, sessão ou `config.toml` real versionado.**
 
 ## O que não é testável

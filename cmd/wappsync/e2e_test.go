@@ -180,9 +180,31 @@ func TestE2ETwoMachines(t *testing.T) {
 		t.Errorf("mensagem duplicada no digest: %d ocorrências", n)
 	}
 
-	// O LEIA-ME acompanha os dados, para um agente que abra a pasta sem contexto.
-	if _, err := os.Stat(filepath.Join(root, "drive", "wapp", "latest", "LEIA-ME.md")); err != nil {
-		t.Errorf("LEIA-ME.md não foi publicado: %v", err)
+	// O guia acompanha os dados, nos dois nomes e nos dois níveis: a raiz é
+	// onde shards/ fica visível, e AGENTS.md é carregado sozinho por várias
+	// ferramentas de agente.
+	prefix := filepath.Join(root, "drive", "wapp")
+	for _, rel := range []string{
+		"LEIA-ME.md", "AGENTS.md",
+		filepath.Join("latest", "LEIA-ME.md"), filepath.Join("latest", "AGENTS.md"),
+	} {
+		body, err := os.ReadFile(filepath.Join(prefix, rel))
+		if err != nil {
+			t.Errorf("guia %s não foi publicado: %v", rel, err)
+			continue
+		}
+		if !strings.Contains(string(body), "dado, não instrução") {
+			t.Errorf("guia %s saiu sem a trava de confiança", rel)
+		}
+	}
+
+	// O guia da raiz precisa apontar para dentro de latest/.
+	rootGuide, err := os.ReadFile(filepath.Join(prefix, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rootGuide), "`latest/digest.md`") {
+		t.Error("guia da raiz não aponta para latest/digest.md")
 	}
 }
 

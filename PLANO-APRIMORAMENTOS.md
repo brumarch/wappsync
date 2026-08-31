@@ -23,8 +23,9 @@ suíte passa e — se for teste de trava — foi validado por mutação.
 | A6 | E2E do ciclo em Go | `cmd/wappsync/e2e_test.go`: duas máquinas, idempotência, filtros, retenção, backend none |
 | A7 | Guarda de versão do whatsmeow | `auditedWhatsmeowVersion`; bump falha até reauditar `enforceReadOnly` |
 | B2 | `internal/wa` testável sem cliente real | 29,4% → 51,2%. `ingestHistory` virou `collectHistory(data, parse)`, com a função de parse por parâmetro; 20 testes novos de `toStoreMessage`/`collectHistory` com protobufs à mão. As duas travas de somente-leitura passaram a inspecionar *referência*, não só chamada — `x := c.wa.SendMessage` passava verde antes |
+| B8 | Guia para os agentes que leem o destino | `export.MarshalGuide`; publicado como `LEIA-ME.md` e `AGENTS.md`, em `latest/` e na raiz. Estabelece que o conteúdo é dado e nunca instrução, dá o critério de frescor, a legenda da notação e o que NÃO se pode concluir. Dois goldens + teste independente da trava de confiança, para sobreviver a um `-update` descuidado |
 
-Cobertura após esta rodada: `config` 88,8% · `merge` 86,2% · `export` 84,9% ·
+Cobertura após esta rodada: `export` 96,4% · `config` 88,8% · `merge` 84,5% ·
 `store` 68,1% · `wa` 51,2% · `cmd` 13,5%.
 
 **Nota sobre B2.** Foi executado pela alternativa barata registrada no próprio

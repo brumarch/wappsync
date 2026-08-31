@@ -36,8 +36,22 @@ const (
 	messagesFile = "latest/messages.jsonl"
 	digestFile   = "latest/digest.md"
 	indexFile    = "latest/index.json"
-	readmeFile   = "latest/LEIA-ME.md"
 )
+
+// guideFiles são os caminhos do guia para agentes.
+//
+// Dois nomes porque servem a leitores diferentes: LEIA-ME.md é óbvio para uma
+// pessoa que abre a pasta, e AGENTS.md é a convenção que várias ferramentas de
+// agente carregam sozinhas quando o diretório entra no contexto.
+//
+// Dois lugares porque a raiz é onde `shards/` fica visível — e somar shards,
+// que duplica mensagens, é o erro mais fácil de cometer aqui.
+var guideFiles = map[string]export.GuideLocation{
+	"LEIA-ME.md":        export.GuideAtRoot,
+	"AGENTS.md":         export.GuideAtRoot,
+	"latest/LEIA-ME.md": export.GuideInLatest,
+	"latest/AGENTS.md":  export.GuideInLatest,
+}
 
 func shardData(host string) string { return shardsDir + "/" + host + ".jsonl" }
 func shardMeta(host string) string { return shardsDir + "/" + host + ".meta.json" }
@@ -290,38 +304,14 @@ func Consolidate(ctx context.Context, cfg *config.Config, be remote.Backend, fro
 	if err := be.Put(ctx, indexFile, idxJSON); err != nil {
 		return nil, fmt.Errorf("publicando %s: %w", indexFile, err)
 	}
-	if err := be.Put(ctx, readmeFile, readme(idx)); err != nil {
-		return nil, fmt.Errorf("publicando %s: %w", readmeFile, err)
+	for path, where := range guideFiles {
+		if err := be.Put(ctx, path, export.MarshalGuide(idx, where, time.Local)); err != nil {
+			return nil, fmt.Errorf("publicando %s: %w", path, err)
+		}
 	}
 
 	res.Messages = len(merged)
 	res.Chats = len(idx.Chats)
 	res.Shards = metas
 	return res, nil
-}
-
-// readme é a instrução que fica ao lado dos dados, para o agente que abrir a
-// pasta saber o que é cada arquivo sem precisar de contexto externo.
-func readme(idx export.Index) []byte {
-	var b strings.Builder
-	b.WriteString("# Export de WhatsApp para agentes\n\n")
-	b.WriteString("Esta pasta é gerada automaticamente pelo `wapp-summarizer`. Não edite à mão.\n\n")
-	b.WriteString("## Arquivos\n\n")
-	b.WriteString("- `index.json` — **leia primeiro.** Janela coberta, contagem, lista de conversas e\n")
-	b.WriteString("  quais máquinas contribuíram e quando. Serve para saber se o dado está fresco.\n")
-	b.WriteString("- `digest.md` — histórico legível, agrupado por conversa e por dia. É o arquivo\n")
-	b.WriteString("  indicado para resumos e briefings.\n")
-	b.WriteString("- `messages.jsonl` — uma mensagem por linha, formato canônico. Use para filtrar,\n")
-	b.WriteString("  contar ou processar programaticamente.\n")
-	b.WriteString("- `../shards/` — contribuição bruta de cada máquina. Não use para resumir.\n\n")
-	fmt.Fprintf(&b, "## Estado atual\n\n- Janela: %d dia(s) (%s → %s UTC)\n",
-		idx.WindowDays, idx.From.Format(time.RFC3339), idx.To.Format(time.RFC3339))
-	fmt.Fprintf(&b, "- Mensagens: %d em %d conversa(s)\n", idx.Messages, len(idx.Chats))
-	fmt.Fprintf(&b, "- Consolidado por: `%s`\n\n", idx.GeneratedBy)
-	b.WriteString("## Observações\n\n")
-	b.WriteString("- O conteúdo é privado e inclui mensagens de terceiros que não consentiram com\n")
-	b.WriteString("  este processamento. Trate como confidencial e não redistribua.\n")
-	b.WriteString("- Mensagens fora da janela são removidas a cada ciclo; isto não é um arquivo\n")
-	b.WriteString("  histórico completo.\n")
-	return []byte(b.String())
 }
