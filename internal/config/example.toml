@@ -1,0 +1,95 @@
+# ---------------------------------------------------------------------------
+# wapp-summarizer — configuração
+# Copie para config.toml e ajuste. Tudo aqui pode ser mudado sem recompilar.
+# ---------------------------------------------------------------------------
+
+# Janela temporal EXPORTADA para a nuvem, em dias.
+# É o único número que você normalmente vai querer mexer.
+window_days = 3
+
+# Quanto tempo guardar no banco LOCAL. Deve ser >= window_days.
+# Guardar mais localmente permite aumentar window_days depois sem perder nada.
+retention_days = 45
+
+# Identidade desta máquina. Aparece no nome do shard na nuvem.
+# Vazio = usa o hostname. Use algo estável e sem espaços (ex: "bruno-win", "bruno-mac").
+host_id = ""
+
+[paths]
+# Onde ficam a sessão do WhatsApp e o banco de mensagens.
+# ATENÇÃO: NÃO aponte para dentro da pasta sincronizada da nuvem.
+# A sessão é uma credencial e o SQLite corrompe sob sincronização.
+# Vazio = ~/.wapp-summarizer  (Windows: %USERPROFILE%\.wapp-summarizer)
+data_dir = ""
+
+[export]
+# De quanto em quanto tempo gerar e enviar o arquivo.
+interval_minutes = 10
+
+# Formatos publicados: "jsonl" (canônico, para máquina) e "markdown" (para o agente ler).
+formats = ["jsonl", "markdown"]
+
+# Incluir suas próprias mensagens (recomendado: dá contexto ao resumo).
+include_from_me = true
+
+# Status/stories e newsletters costumam ser ruído.
+include_status_broadcast = false
+include_newsletters = false
+
+# Mídia nunca é baixada. Com isto ligado, vira um marcador: "[imagem] legenda".
+media_placeholders = true
+
+# Corta mensagens gigantes (0 = sem limite).
+max_message_chars = 4000
+
+[filter]
+# Se NÃO estiver vazio, SOMENTE estes chats são exportados.
+# Aceita JID completo ("120363...@g.us") ou pedaço do nome ("Família").
+include_only = []
+
+# Chats que nunca saem daqui. Tem prioridade sobre include_only.
+exclude = [
+  # "Financeiro",
+  # "5511999999999@s.whatsapp.net",
+]
+
+[privacy]
+# Troca números de telefone no CORPO das mensagens por [TEL].
+redact_phone_numbers = false
+
+# Regexes extras; o que casar vira [REDACTED]. Ex.: cartões, CPF, tokens.
+redact_patterns = [
+  # '\d{3}\.\d{3}\.\d{3}-\d{2}',
+]
+
+[remote]
+# "folder"  -> escreve numa pasta local que o app do Google Drive/OneDrive/Dropbox sincroniza.
+#              Zero credenciais. É o modo recomendado para começar.
+# "rclone"  -> usa o binário rclone (Google Drive via API, S3, B2, R2, etc.).
+# "none"    -> só gera local em <data_dir>/out, não envia nada.
+backend = "folder"
+
+# Subpasta dentro do destino.
+prefix = "wapp-summarizer"
+
+[remote.folder]
+# Ex. Windows: 'G:/Meu Drive/wapp'
+# Ex. macOS:   '/Users/bruno/Library/CloudStorage/GoogleDrive-x/Meu Drive/wapp'
+# Ex. WSL:     '/mnt/g/Meu Drive/wapp'
+path = ""
+
+[remote.rclone]
+binary = "rclone"
+# Remote já configurado via `rclone config`. Ex.: "gdrive:wapp" ou "s3-privado:meu-bucket/wapp"
+remote = ""
+
+[merge]
+# Consolida os shards de TODAS as máquinas em um único arquivo para os agentes lerem.
+enabled = true
+
+# Trava de segurança: nunca publica um merge que regrida
+# (shard de outra máquina ilegível, ou timestamp máximo menor que o já publicado).
+guard_monotonic = true
+
+# Lease cooperativo para duas máquinas não consolidarem ao mesmo tempo.
+lease_minutes = 15

@@ -1,0 +1,18 @@
+# Dados locais: sessão do WhatsApp e banco de mensagens. NUNCA versionar.
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Configuração real (contém caminhos/remotes pessoais)
+config.toml
+
+# Saídas de export
+/out/
+*.jsonl
+*.jsonl.gz
+
+# Binários
+/wappsync
+/wappsync.exe
+/bin/
