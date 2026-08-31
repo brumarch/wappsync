@@ -12,7 +12,10 @@ config.toml
 *.jsonl
 *.jsonl.gz
 
-# Binários
+# Binários (inclui os .exe~ que o linker do Go deixa no Windows)
 /wappsync
 /wappsync.exe
+wappsync.exe~
+*.exe
+*.exe~
 /bin/

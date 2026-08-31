@@ -44,6 +44,61 @@ e comutativa — dois merges simultâneos convergem para o mesmo resultado.
 
 ---
 
+## Garantia de somente-leitura
+
+Este programa **não consegue enviar nem responder mensagens**. Não é uma promessa
+no README — é verificada por teste a cada `go test`.
+
+Não envia mensagem, não responde, não reage, não edita, não apaga, não cria nem
+altera grupos, não marca como lido e não mostra "digitando" ou "online".
+
+### Como isso é garantido
+
+**Allowlist de chamadas.** `c.wa` é o único `*whatsmeow.Client` do módulo.
+`TestClientCallsAreAllowlisted` percorre a AST de todo o código-fonte e falha se
+qualquer chamada nesse cliente não estiver numa lista explícita — hoje dez
+entradas, todas leitura, conexão ou pareamento. Nada alcança a conta sem passar
+por ali.
+
+**Denylist de API.** `TestNoWriteAPIAnywhere` falha se `SendMessage`, `MarkRead`,
+`SendChatPresence`, `BuildReaction`, `LeaveGroup` e outras ~40 operações de
+escrita aparecerem em qualquer lugar do módulo, sob qualquer nome de variável.
+Cobre o caso de alguém criar um segundo cliente.
+
+Por serem baseados em AST e não em texto, os dois ignoram nomes que apareçam em
+comentários ou strings — inclusive a própria denylist.
+
+**Recusa de reenvio induzido.** Existe um caminho em que o whatsmeow enviaria
+uma mensagem sem que a peçamos: um *retry receipt* de outro aparelho pedindo o
+reenvio de algo. Na prática ele já morre sozinho (nunca enviamos nada, então não
+há mensagem em cache), mas `enforceReadOnly` recusa explicitamente — `PreRetryCallback`
+sempre retorna `false` e `GetMessageForRetry` sempre retorna `nil`. Depender de
+um default do whatsmeow seria frágil.
+
+Os testes foram validados por mutação: injetando `SendMessage`, `MarkRead` e
+`SendChatPresence` no código, ambos falham e apontam arquivo e linha.
+
+### O que ele *de fato* emite
+
+Honestidade sobre o tráfego de saída — nada disso é mensagem, mas existe:
+
+| Emitido | O que é | Visível para terceiros? |
+|---|---|---|
+| ACK de stanza | confirmação de protocolo de que o pacote chegou | não |
+| Recibo de entrega | tipo `inactive`, porque nunca chamamos `SendPresence` | ✓✓ cinza, como qualquer aparelho vinculado |
+| Retry receipt | pede ao remetente que reenvie o que não decriptou | não |
+| ACK de history sync | confirma o recebimento do bloco de histórico | não |
+
+Em particular: **não envia recibo de leitura** (o ✓✓ azul não aparece por causa
+deste programa) e **nunca fica "online"**, porque `SendPresence` não é chamado em
+lugar nenhum — nem por nós, nem internamente pelo whatsmeow.
+
+As duas únicas operações que alteram a conta são `login` (vincula este aparelho)
+e `logout` (desvincula), ambas invocadas explicitamente por você na linha de
+comando. `logout` só remove acesso.
+
+---
+
 ## Instalação
 
 Requer **Go 1.26+** ([go.dev/dl](https://go.dev/dl/)). Não precisa de compilador C:

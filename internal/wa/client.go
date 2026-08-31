@@ -15,6 +15,7 @@ import (
 
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -73,8 +74,37 @@ func New(ctx context.Context, cfg *config.Config, db *msgstore.DB, verbose bool)
 		log:       clientLog,
 		names:     map[string]string{},
 	}
+	enforceReadOnly(c.wa)
 	c.wa.AddEventHandler(c.handleEvent)
 	return c, nil
+}
+
+// enforceReadOnly fixa a postura somente-leitura do cliente.
+//
+// Nenhum caminho deste programa chama SendMessage, MarkRead, SendPresence ou
+// qualquer mutação de grupo — isso é verificado por TestClientIsReadOnly. O que
+// esta função cobre é a única forma de o whatsmeow enviar uma mensagem sem que
+// a peçamos: um retry receipt de outro aparelho pedindo o reenvio de algo.
+//
+// Na prática esse caminho já morre sozinho (nunca enviamos nada, logo não há
+// mensagem em cache para reenviar), mas depender de um default é frágil.
+// Aqui a recusa é explícita e sobrevive a mudanças de default no whatsmeow.
+func enforceReadOnly(cli *whatsmeow.Client) {
+	// Não guardar mensagens enviadas para atender pedidos de reenvio.
+	cli.UseRetryMessageStore = false
+
+	// Nunca localizar uma mensagem para reenviar.
+	cli.GetMessageForRetry = func(requester, to types.JID, id types.MessageID) *waE2E.Message {
+		return nil
+	}
+
+	// Recusar todo pedido de reenvio antes que ele seja processado.
+	cli.PreRetryCallback = func(_ *events.Receipt, _ types.MessageID, _ int, _ *waE2E.Message) bool {
+		return false
+	}
+
+	// Não pedir ao celular o reenvio de mensagens que falharam ao decriptar.
+	cli.AutomaticMessageRerequestFromPhone = false
 }
 
 func (c *Client) Close() {
