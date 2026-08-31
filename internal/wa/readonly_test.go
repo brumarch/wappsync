@@ -17,7 +17,7 @@ import (
 )
 
 // allowedClientCalls é a lista COMPLETA de operações que este programa pode
-// invocar no cliente do WhatsApp. Toda entrada é leitura, conexão ou
+// alcançar no cliente do WhatsApp. Toda entrada é leitura, conexão ou
 // pareamento. Adicionar qualquer coisa aqui é uma decisão consciente de
 // ampliar o que o programa faz na conta — não faça sem entender o efeito.
 var allowedClientCalls = map[string]string{
@@ -31,6 +31,7 @@ var allowedClientCalls = map[string]string{
 	"c.wa.GetJoinedGroups":               "leitura: lista de grupos",
 	"c.wa.ParseWebMessage":               "conversão local de protobuf, sem rede",
 	"c.wa.Store.Contacts.GetAllContacts": "leitura: nomes de contatos do banco local",
+	"c.wa.Store.ID":                      "leitura: ponteiro do JID próprio; nil significa não pareado",
 	"c.wa.Store.ID.String":               "leitura: JID do próprio aparelho, formatação local",
 }
 
@@ -130,39 +131,51 @@ func dottedPath(expr ast.Expr) string {
 	return ""
 }
 
-// Toda chamada feita no cliente do WhatsApp precisa estar na allowlist.
+// Toda referência ao cliente do WhatsApp precisa estar na allowlist.
 // É a verificação mais forte: c.wa é o único *whatsmeow.Client do módulo, então
 // nada alcança a conta sem passar por aqui.
+//
+// Repare que a inspeção é por referência, não por chamada. Um method value
+// (`c.wa.ParseWebMessage` sem parênteses, passado adiante como função) não
+// aparece como chamada em c.wa: `f := c.wa.SendMessage` seguido de `f(...)`
+// escaparia de uma verificação restrita a CallExpr. E method value é justamente
+// o que collectHistory usa para ficar testável — o buraco seria real.
 func TestClientCallsAreAllowlisted(t *testing.T) {
 	var unexpected []string
 
 	eachGoFile(t, func(path string, fset *token.FileSet, file *ast.File) {
 		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
+			sel, ok := n.(*ast.SelectorExpr)
 			if !ok {
 				return true
 			}
-			p := dottedPath(call.Fun)
+			p := dottedPath(sel)
 			if !strings.HasPrefix(p, "c.wa.") {
 				return true
 			}
 			if _, allowed := allowedClientCalls[p]; !allowed {
 				unexpected = append(unexpected,
-					fset.Position(call.Pos()).String()+": "+p+"()")
+					fset.Position(sel.Pos()).String()+": "+p)
 			}
-			return true
+			// Não desce: só a cadeia mais longa vale. Descendo, os prefixos
+			// (c.wa.Store, c.wa.Store.ID) virariam violações próprias e a
+			// allowlist teria que listar caminho intermediário sem significado.
+			return false
 		})
 	})
 
 	sort.Strings(unexpected)
 	for _, u := range unexpected {
-		t.Errorf("chamada não autorizada no cliente do WhatsApp:\n  %s\n"+
+		t.Errorf("acesso não autorizado ao cliente do WhatsApp:\n  %s\n"+
 			"  Se for realmente leitura, adicione em allowedClientCalls explicando o porquê.", u)
 	}
 }
 
 // Nenhuma API de escrita do whatsmeow pode aparecer no módulo, sob qualquer
 // nome de variável. Cobre o caso de alguém criar um segundo cliente.
+//
+// Também aqui a inspeção é por referência: `send := cli.SendMessage` precisa
+// falhar, senão a trava se resume a proibir uma sintaxe, não uma capacidade.
 func TestNoWriteAPIAnywhere(t *testing.T) {
 	banned := make(map[string]bool, len(forbiddenMethods))
 	for _, m := range forbiddenMethods {
@@ -171,18 +184,14 @@ func TestNoWriteAPIAnywhere(t *testing.T) {
 
 	eachGoFile(t, func(path string, fset *token.FileSet, file *ast.File) {
 		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
+			sel, ok := n.(*ast.SelectorExpr)
 			if !ok {
 				return true
 			}
 			if banned[sel.Sel.Name] {
-				t.Errorf("API de escrita do WhatsApp invocada em %s: %s()\n"+
+				t.Errorf("API de escrita do WhatsApp referenciada em %s: %s\n"+
 					"  Este programa é somente-leitura por desenho; ver enforceReadOnly.",
-					fset.Position(call.Pos()), sel.Sel.Name)
+					fset.Position(sel.Pos()), sel.Sel.Name)
 			}
 			return true
 		})

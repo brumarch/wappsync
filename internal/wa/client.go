@@ -16,6 +16,8 @@ import (
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -332,6 +334,15 @@ func (c *Client) toStoreMessage(evt *events.Message, source string) (msgstore.Me
 	}, true
 }
 
+// parseWebFunc converte o protobuf de uma mensagem do history sync no mesmo
+// *events.Message que uma mensagem ao vivo produz.
+//
+// É parâmetro de collectHistory, e não uma chamada direta a c.wa, porque a
+// única dependência do percurso do history sync no cliente conectado era essa.
+// Com ela para fora, todo o resto vira função testável com protobufs montados à
+// mão — ver "O que não é testável" no CLAUDE.md.
+type parseWebFunc func(chatJID types.JID, webMsg *waWeb.WebMessageInfo) (*events.Message, error)
+
 // ingestHistory processa o histórico que o WhatsApp empurra ao parear e nas
 // sincronizações periódicas.
 func (c *Client) ingestHistory(ctx context.Context, evt *events.HistorySync) {
@@ -339,8 +350,26 @@ func (c *Client) ingestHistory(ctx context.Context, evt *events.HistorySync) {
 	if data == nil {
 		return
 	}
-	syncType := data.GetSyncType().String()
+	batch, chats := c.collectHistory(data, c.wa.ParseWebMessage)
 
+	for _, ch := range chats {
+		_ = c.db.UpsertChat(ctx, ch)
+	}
+	syncType := data.GetSyncType().String()
+	written, err := c.db.PutMessages(ctx, batch)
+	if err != nil {
+		c.log.Warnf("history sync (%s): %v", syncType, err)
+		return
+	}
+	if len(batch) > 0 {
+		c.log.Infof("history sync %s: %d mensagens recebidas, %d novas/atualizadas", syncType, len(batch), written)
+	}
+}
+
+// collectHistory percorre o history sync e devolve o que gravar, sem tocar no
+// banco nem na rede. Os filtros são os mesmos do caminho ao vivo, porque quem
+// decide o que entra continua sendo toStoreMessage.
+func (c *Client) collectHistory(data *waHistorySync.HistorySync, parse parseWebFunc) ([]msgstore.Message, map[string]msgstore.Chat) {
 	var batch []msgstore.Message
 	chats := map[string]msgstore.Chat{}
 
@@ -362,7 +391,7 @@ func (c *Client) ingestHistory(ctx context.Context, evt *events.HistorySync) {
 
 		var lastTS time.Time
 		for _, hm := range conv.GetMessages() {
-			parsed, err := c.wa.ParseWebMessage(chatJID, hm.GetMessage())
+			parsed, err := parse(chatJID, hm.GetMessage())
 			if err != nil {
 				continue
 			}
@@ -383,24 +412,15 @@ func (c *Client) ingestHistory(ctx context.Context, evt *events.HistorySync) {
 		}
 	}
 
-	// Nomes de exibição que só chegam no history sync.
+	// Nomes de exibição que só chegam no history sync. Depois do laço de
+	// propósito: aqui já não afetam os nomes das mensagens deste lote, só os
+	// dos lotes seguintes.
 	for _, pn := range data.GetPushnames() {
 		if pn.GetPushname() != "" && pn.GetID() != "" {
 			c.setName(pn.GetID(), pn.GetPushname())
 		}
 	}
-
-	for _, ch := range chats {
-		_ = c.db.UpsertChat(ctx, ch)
-	}
-	written, err := c.db.PutMessages(ctx, batch)
-	if err != nil {
-		c.log.Warnf("history sync (%s): %v", syncType, err)
-		return
-	}
-	if len(batch) > 0 {
-		c.log.Infof("history sync %s: %d mensagens recebidas, %d novas/atualizadas", syncType, len(batch), written)
-	}
+	return batch, chats
 }
 
 // wantChat aplica os filtros estruturais (status, newsletters, bots).

@@ -22,9 +22,16 @@ suíte passa e — se for teste de trava — foi validado por mutação.
 | A5 | Golden test do `digest.md` | `internal/export/testdata/digest.golden.md`, com `-update` |
 | A6 | E2E do ciclo em Go | `cmd/wappsync/e2e_test.go`: duas máquinas, idempotência, filtros, retenção, backend none |
 | A7 | Guarda de versão do whatsmeow | `auditedWhatsmeowVersion`; bump falha até reauditar `enforceReadOnly` |
+| B2 | `internal/wa` testável sem cliente real | 29,4% → 51,2%. `ingestHistory` virou `collectHistory(data, parse)`, com a função de parse por parâmetro; 20 testes novos de `toStoreMessage`/`collectHistory` com protobufs à mão. As duas travas de somente-leitura passaram a inspecionar *referência*, não só chamada — `x := c.wa.SendMessage` passava verde antes |
 
 Cobertura após esta rodada: `config` 88,8% · `merge` 86,2% · `export` 84,9% ·
-`store` 68,1% · `wa` 29,4% · `cmd` 13,5%.
+`store` 68,1% · `wa` 51,2% · `cmd` 13,5%.
+
+**Nota sobre B2.** Foi executado pela alternativa barata registrada no próprio
+item, não pela proposta principal: nenhum corpus de conversa real foi capturado
+nem versionado, e a decisão de privacidade correspondente segue em aberto. Se um
+dia fizer falta — fidelidade ao que o WhatsApp realmente manda, que fixture
+montada à mão não garante —, o caminho continua disponível.
 
 ---
 
@@ -42,23 +49,6 @@ desligado por padrão.
 **Cuidados.** `Download` é leitura de mídia, mas **precisa entrar na allowlist**
 de `readonly_test.go` com justificativa. Custo de banda, CPU e disco. Decidir
 se o áudio bruto é descartado após transcrever (recomendado).
-
----
-
-### B2 — Corpus de fixtures reais anonimizadas · impacto alto · esforço médio
-
-**Problema.** `internal/wa` está em 29,4%. `toStoreMessage` e `ingestHistory`
-não têm teste porque exigem `*events.Message` e `*whatsmeow.Client` reais.
-
-**Proposta.** Capturar uma vez, de uma sessão real, os protobufs de mensagens e
-de history sync; anonimizar (JIDs, nomes, corpos) e versionar em `testdata/`.
-Desbloqueia testar o caminho de ingestão com o que o WhatsApp realmente manda,
-que é diferente do que se imagina ao montar fixtures à mão.
-
-**Cuidados.** Exige decisão de privacidade do usuário: o corpus sai de conversas
-reais de terceiros. Anonimização precisa ser verificada antes de commitar.
-Alternativa mais barata: refatorar `ingestHistory` para receber a função de
-parse por parâmetro, tornando-a testável sem cliente.
 
 ---
 

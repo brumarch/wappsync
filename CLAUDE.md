@@ -18,8 +18,13 @@ ameaçar qualquer uma delas, pare e traga a decisão para o usuário.
 Verificado por `internal/wa/readonly_test.go`:
 
 - `TestClientCallsAreAllowlisted` — `c.wa` é o único `*whatsmeow.Client` do
-  módulo; toda chamada nele precisa estar numa allowlist explícita.
+  módulo; todo **acesso** a ele precisa estar numa allowlist explícita.
 - `TestNoWriteAPIAnywhere` — ~40 APIs de escrita banidas em qualquer arquivo.
+
+Ambas inspecionam *referência*, não chamada: `x := c.wa.SendMessage` seguido de
+`x(...)` escapa de uma verificação restrita a `CallExpr`. Não afrouxe isso para
+`CallExpr` — `collectHistory` recebe `c.wa.ParseWebMessage` como method value,
+então o padrão está em uso e o buraco seria real.
 - `enforceReadOnly` fecha o único caminho de envio não solicitado: um *retry
   receipt* pedindo reenvio.
 
@@ -62,6 +67,11 @@ go test ./internal/export/ -run TestDigestGolden -update   # regravar o golden
 - **`-race` não roda aqui**: exige cgo, e não há gcc. É o motivo principal da CI
   existir. `handleEvent` roda nas goroutines do whatsmeow em paralelo com o ciclo
   de export, então corrida é risco concreto.
+- **`gofmt -l .` lista *todos* os arquivos nesta máquina, sempre.** O
+  `.gitattributes` tem `* text=auto`, o checkout no Windows é CRLF e o gofmt quer
+  LF — a saída é ruído, não erro de formatação. Para o veredito real, normalize
+  antes: copie para uma árvore temporária com `sed 's/\r$//'` e rode o gofmt lá.
+  Quem dá o veredito de verdade é a CI, que roda em Linux com LF.
 - **Go 1.26+ obrigatório** (exigência do whatsmeow). Driver SQLite puro Go
   (`modernc.org/sqlite`): nenhum compilador C deve virar dependência.
 - **O linker deixa `.exe~`**; já coberto pelo `.gitignore`, mas confira
