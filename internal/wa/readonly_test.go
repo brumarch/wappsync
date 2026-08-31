@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -216,6 +217,40 @@ func TestNewCallsEnforceReadOnly(t *testing.T) {
 
 	if !found {
 		t.Error("wa.New não chama mais enforceReadOnly")
+	}
+}
+
+// auditedWhatsmeowVersion é a versão contra a qual a garantia de somente-leitura
+// foi auditada à mão: quais envios o whatsmeow faz sozinho, e por quais caminhos
+// ele poderia enviar uma mensagem sem que a peçamos.
+//
+// Os testes acima travam o NOSSO lado permanentemente, mas não o comportamento
+// interno da biblioteca — uma versão nova pode introduzir envio automático.
+// Por isso um bump só passa depois de reauditar enforceReadOnly.
+const auditedWhatsmeowVersion = "v0.0.0-20260828224850-0fadda796019"
+
+var whatsmeowRequire = regexp.MustCompile(`(?m)^\s*go\.mau\.fi/whatsmeow\s+(\S+)`)
+
+func TestWhatsmeowVersionWasAudited(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(moduleRoot(t), "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := whatsmeowRequire.FindSubmatch(data)
+	if m == nil {
+		t.Fatal("não achei a linha do whatsmeow no go.mod")
+	}
+
+	if got := string(m[1]); got != auditedWhatsmeowVersion {
+		t.Errorf(`whatsmeow está em %s mas a auditoria de somente-leitura foi feita em %s.
+
+Antes de atualizar auditedWhatsmeowVersion, reveja no código novo do whatsmeow:
+  1. o que ele envia sozinho (receipt.go, presence.go, retry.go, message.go);
+  2. se SendPresence passou a ser chamado internamente — isso ligaria recibos
+     de leitura e o status "online";
+  3. se surgiu algum caminho novo que envie mensagem sem passar por SendMessage.
+Depois ajuste enforceReadOnly se necessário e atualize a constante.`,
+			got, auditedWhatsmeowVersion)
 	}
 }
 

@@ -90,6 +90,7 @@ func Window(recs []export.Record, from time.Time) []export.Record {
 func PublishShard(ctx context.Context, cfg *config.Config, be remote.Backend, local []export.Record, deviceJID string, from, now time.Time) (export.ShardMeta, error) {
 	meta := export.ShardMeta{
 		Host:        cfg.HostID,
+		Schema:      export.SchemaVersion,
 		DeviceJID:   deviceJID,
 		GeneratedAt: now.UTC(),
 	}
@@ -203,6 +204,24 @@ func Consolidate(ctx context.Context, cfg *config.Config, be remote.Backend, fro
 		}
 		host := strings.TrimSuffix(name, ".jsonl")
 
+		meta := export.ShardMeta{Host: host}
+		if md, err := be.Get(ctx, shardMeta(host)); err == nil {
+			_ = json.Unmarshal(md, &meta)
+		}
+
+		// Schema incompatível significa que aquela máquina roda um binário de
+		// outra geração. Fundir formatos diferentes produziria um consolidado
+		// silenciosamente errado — em especial porque Record.Prio, calculado
+		// por fórmulas distintas, continuaria "funcionando". Melhor travar e
+		// dizer exatamente qual máquina precisa ser atualizada.
+		if !export.SchemaCompatible(meta.Schema) {
+			res.Skipped = true
+			res.Reason = fmt.Sprintf("shard %q usa o formato %q e este binário usa %q; "+
+				"atualize a máquina desatualizada. Mantendo o consolidado anterior",
+				host, meta.Schema, export.SchemaVersion)
+			return res, nil
+		}
+
 		data, err := be.Get(ctx, shardData(host))
 		if err != nil {
 			// Um shard ilegível é exatamente o caso em que consolidar
@@ -220,10 +239,7 @@ func Consolidate(ctx context.Context, cfg *config.Config, be remote.Backend, fro
 		read[host] = true
 		sets = append(sets, recs)
 
-		meta := export.ShardMeta{Host: host, Messages: len(recs)}
-		if md, err := be.Get(ctx, shardMeta(host)); err == nil {
-			_ = json.Unmarshal(md, &meta)
-		}
+		meta.Messages = len(recs)
 		metas = append(metas, meta)
 	}
 

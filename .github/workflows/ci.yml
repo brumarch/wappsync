@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Testes (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Formatação
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Arquivos fora do gofmt:"
+            echo "$unformatted"
+            echo "Rode: gofmt -w ."
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # O detector de corrida é o principal motivo de a CI existir: ele exige
+      # cgo, que a máquina de desenvolvimento (Windows, sem gcc) não tem.
+      # handleEvent roda nas goroutines do whatsmeow em paralelo com o ciclo
+      # de export, então corrida aqui é um risco concreto, não teórico.
+      - name: Testes com detector de corrida
+        run: go test ./... -race -count=1
+
+      - name: Cobertura
+        run: |
+          go test ./... -coverprofile=cover.out
+          go tool cover -func=cover.out | tail -20
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: linux, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # O projeto roda em Windows, macOS e WSL ao mesmo tempo, mas o
+      # desenvolvimento acontece em um só. Sem esta matriz, uma quebra de
+      # compilação nas outras plataformas só apareceria no dia do deploy.
+      # CGO_ENABLED=0 confirma de quebra que o driver SQLite puro Go segue
+      # sendo suficiente — nenhum compilador C deve ser necessário.
+      - name: Compilar
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -o /dev/null ./cmd/wappsync

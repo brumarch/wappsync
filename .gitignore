@@ -12,6 +12,10 @@ config.toml
 *.jsonl
 *.jsonl.gz
 
+# ...mas fixtures e goldens de teste TÊM que ser versionados.
+# Esta negação precisa vir depois dos padrões acima.
+!**/testdata/**
+
 # Binários (inclui os .exe~ que o linker do Go deixa no Windows)
 /wappsync
 /wappsync.exe

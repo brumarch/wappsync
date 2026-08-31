@@ -33,6 +33,12 @@ type Message struct {
 }
 
 // Rank define a precedência de uma versão da mensagem. Maior vence.
+//
+// ATENÇÃO: este número viaja entre máquinas como Record.Prio e é comparado
+// com o de shards produzidos por outros binários. Mudar a fórmula exige
+// bumpar export.SchemaVersion — senão máquinas com fórmulas diferentes
+// continuam comparando números sem erro nenhum, e o merge passa a escolher
+// a versão errada da mensagem em silêncio.
 func (m Message) Rank() int {
 	r := m.Revision * 1000
 	if m.Deleted {

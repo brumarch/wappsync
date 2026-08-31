@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -350,6 +351,119 @@ func TestAbortedConsolidateReleasesLease(t *testing.T) {
 	}
 	if res.Messages != 2 {
 		t.Errorf("consolidou %d mensagens, queria 2", res.Messages)
+	}
+}
+
+// writeShard grava um shard cru na nuvem, com o meta que o teste quiser.
+// Serve para simular uma máquina rodando outro binário.
+func (h *harness) writeShard(t *testing.T, host string, meta export.ShardMeta, recs []export.Record) {
+	t.Helper()
+	body, err := export.MarshalJSONL(recs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(h.drive, "wapp", "shards")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, host+".jsonl"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	metaJSON, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, host+".meta.json"), metaJSON, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPublishShardStampsSchema(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+
+	meta, err := PublishShard(ctx, h.a, h.beA,
+		[]export.Record{rec("A1", "g@g.us", "x", h.now.Add(-time.Hour), 111)}, "", h.from, h.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Schema != export.SchemaVersion {
+		t.Errorf("Schema = %q, queria %q", meta.Schema, export.SchemaVersion)
+	}
+
+	// E o schema tem que chegar ao arquivo, não só ao valor devolvido.
+	raw, err := h.beA.Get(ctx, "shards/maquina-a.meta.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var onDisk export.ShardMeta
+	if err := json.Unmarshal(raw, &onDisk); err != nil {
+		t.Fatal(err)
+	}
+	if onDisk.Schema != export.SchemaVersion {
+		t.Errorf("meta publicado sem schema: %+v", onDisk)
+	}
+}
+
+// Uma máquina rodando outro formato não pode ser fundida em silêncio: o
+// Record.Prio dela viria de outra fórmula e o merge escolheria errado sem
+// dar nenhum sinal.
+func TestConsolidateAbortsOnIncompatibleSchema(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	ts := h.now.Add(-time.Hour)
+
+	if _, err := PublishShard(ctx, h.a, h.beA,
+		[]export.Record{rec("A1", "g@g.us", "de A", ts, 111)}, "", h.from, h.now); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := Consolidate(ctx, h.a, h.beA, h.from, h.now); err != nil || res.Skipped {
+		t.Fatalf("consolidação inicial falhou: %v / %+v", err, res)
+	}
+	before := h.readIndex(t)
+
+	// Máquina B foi atualizada para um formato futuro.
+	h.writeShard(t, "maquina-b",
+		export.ShardMeta{Host: "maquina-b", Schema: "wapp-summarizer/2", GeneratedAt: h.now.UTC()},
+		[]export.Record{rec("B1", "g@g.us", "de B", ts, 999)})
+
+	res, err := Consolidate(ctx, h.a, h.beA, h.from, h.now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Skipped {
+		t.Fatal("fundiu shards de formatos diferentes")
+	}
+	if !strings.Contains(res.Reason, "maquina-b") || !strings.Contains(res.Reason, "atualize") {
+		t.Errorf("o motivo não diz qual máquina atualizar: %q", res.Reason)
+	}
+
+	after := h.readIndex(t)
+	if after.Messages != before.Messages {
+		t.Errorf("consolidado anterior foi alterado: %d -> %d", before.Messages, after.Messages)
+	}
+}
+
+// Shard publicado antes de o campo Schema existir continua sendo aceito:
+// não queremos um flag day que trave a consolidação de todo mundo.
+func TestLegacyShardWithoutSchemaIsAccepted(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	ts := h.now.Add(-time.Hour)
+
+	h.writeShard(t, "maquina-antiga",
+		export.ShardMeta{Host: "maquina-antiga", GeneratedAt: h.now.UTC()}, // sem Schema
+		[]export.Record{rec("V1", "g@g.us", "de uma versão antiga", ts, 111)})
+
+	res, err := Consolidate(ctx, h.a, h.beA, h.from, h.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Skipped {
+		t.Fatalf("shard legado foi recusado: %s", res.Reason)
+	}
+	if res.Messages != 1 {
+		t.Errorf("consolidou %d mensagens, queria 1", res.Messages)
 	}
 }
 

@@ -245,7 +245,7 @@ func cmdRun(ctx context.Context, cfg *config.Config, verbose, once bool) error {
 	}
 
 	for {
-		if err := cycle(ctx, cfg, db, client.JID()); err != nil {
+		if err := cycle(ctx, cfg, db, client.JID(), time.Now()); err != nil {
 			fmt.Fprintf(os.Stderr, "ciclo falhou: %v\n", err)
 		}
 		if once {
@@ -256,7 +256,7 @@ func cmdRun(ctx context.Context, cfg *config.Config, verbose, once bool) error {
 			fmt.Println("\nEncerrando; publicando um último ciclo...")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			if err := cycle(shutdownCtx, cfg, db, client.JID()); err != nil {
+			if err := cycle(shutdownCtx, cfg, db, client.JID(), time.Now()); err != nil {
 				fmt.Fprintf(os.Stderr, "ciclo final falhou: %v\n", err)
 			}
 			return nil
@@ -271,7 +271,7 @@ func cmdExport(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	defer db.Close()
-	return cycle(ctx, cfg, db, "")
+	return cycle(ctx, cfg, db, "", time.Now())
 }
 
 func cmdMerge(ctx context.Context, cfg *config.Config) error {
@@ -383,8 +383,10 @@ func cmdGroups(ctx context.Context, cfg *config.Config, verbose bool) error {
 
 // cycle é uma rodada completa: lê o banco, gera os artefatos, salva uma cópia
 // local, publica o shard desta máquina e consolida.
-func cycle(ctx context.Context, cfg *config.Config, db *store.DB, deviceJID string) error {
-	now := time.Now()
+//
+// now entra por parâmetro em vez de vir de time.Now(): é o que torna um ciclo
+// inteiro reproduzível nos testes de integração.
+func cycle(ctx context.Context, cfg *config.Config, db *store.DB, deviceJID string, now time.Time) error {
 	from := now.Add(-cfg.Window())
 
 	msgs, err := db.Since(ctx, from)

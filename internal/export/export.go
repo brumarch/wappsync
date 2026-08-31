@@ -15,8 +15,33 @@ import (
 	"github.com/bmar13/wapp-summarizer/internal/store"
 )
 
-// SchemaVersion muda quando o formato do Record muda de forma incompatível.
+// SchemaVersion identifica o formato dos artefatos publicados.
+//
+// Máquinas diferentes rodam binários diferentes — você atualiza o Windows hoje
+// e o Mac daqui a duas semanas. O merge assume que os shards são comparáveis
+// entre si, então essa suposição precisa ser verificada, não presumida.
+//
+// BUMPE ESTA CONSTANTE ao mudar qualquer uma destas coisas:
+//   - os campos de Record ou o significado deles;
+//   - a fórmula de store.Message.Rank(), que produz Record.Prio.
+//
+// O segundo caso é o mais traiçoeiro: prioridades calculadas por fórmulas
+// diferentes continuam sendo números comparáveis, então nada quebra — o merge
+// apenas passa a escolher a versão errada da mensagem, em silêncio.
 const SchemaVersion = "wapp-summarizer/1"
+
+// legacySchema é o que assumimos para um shard publicado antes de o campo
+// Schema existir. Evita um flag day sem enfraquecer a checagem daqui em diante.
+const legacySchema = "wapp-summarizer/1"
+
+// SchemaCompatible informa se um shard com este schema pode ser fundido com o
+// que este binário produz.
+func SchemaCompatible(schema string) bool {
+	if schema == "" {
+		schema = legacySchema
+	}
+	return schema == SchemaVersion
+}
 
 // Record é uma mensagem no formato publicado. Uma linha de JSONL.
 type Record struct {
@@ -53,7 +78,10 @@ type ChatSummary struct {
 
 // ShardMeta descreve a contribuição de uma máquina.
 type ShardMeta struct {
-	Host        string    `json:"host"`
+	Host string `json:"host"`
+	// Schema é a versão do formato que ESTA máquina publicou. Vazio significa
+	// um shard antigo, anterior a este campo; ver legacySchema.
+	Schema      string    `json:"schema,omitempty"`
 	DeviceJID   string    `json:"device_jid,omitempty"`
 	GeneratedAt time.Time `json:"generated_at"`
 	Messages    int       `json:"messages"`
