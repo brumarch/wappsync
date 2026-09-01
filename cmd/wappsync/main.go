@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -409,7 +410,12 @@ func cmdStatus(ctx context.Context, cfg *config.Config, verbose bool) error {
 	fmt.Printf("Na janela:   %d mensagens\n\n", st.InWindow)
 
 	client, err := wa.New(ctx, cfg, db, verbose)
-	if err == nil {
+	if err != nil {
+		// Este é o comando de diagnóstico: engolir o erro aqui esconde
+		// justamente o que se veio ver. Um whisper ausente, por exemplo,
+		// impede o `run` de subir e não aparecia em lugar nenhum.
+		fmt.Printf("Pareamento:  não consegui abrir a sessão: %v\n", err)
+	} else {
 		defer client.Close()
 		if client.IsPaired() {
 			fmt.Printf("Pareamento:  %s\n", client.JID())
@@ -475,10 +481,25 @@ func cmdGroups(ctx context.Context, cfg *config.Config, verbose bool) error {
 	}
 	fmt.Printf("%d grupo(s):\n\n", len(groups))
 	for _, g := range groups {
-		fmt.Printf("  %-45s  %3d membros  %s\n", g.Name, g.ParticipantCount, g.JID.String())
+		fmt.Printf("  %-40s  %3d membros  %-28s  anexos: %s\n",
+			g.Name, g.ParticipantCount, g.JID.String(), describeMediaPolicy(cfg, g.JID.String(), g.Name))
 	}
 	fmt.Println("\nUse os nomes (ou JIDs) em [filter].include_only / [filter].exclude no config.toml")
+	fmt.Println("A coluna \"anexos\" mostra a política de [[media.chat]] JÁ RESOLVIDA para cada")
+	fmt.Println("conversa: é o que este binário faria hoje, não o que o TOML parece dizer.")
 	return nil
+}
+
+// describeMediaPolicy resume o que seria baixado num chat.
+func describeMediaPolicy(cfg *config.Config, jid, name string) string {
+	if !cfg.Media.Enabled {
+		return "nenhum ([media].enabled desligado)"
+	}
+	kinds := cfg.MediaKindsFor(jid, name)
+	if len(kinds) == 0 {
+		return "nenhum"
+	}
+	return strings.Join(kinds, ", ")
 }
 
 // ------------------------------------------------------------------ ciclo ---

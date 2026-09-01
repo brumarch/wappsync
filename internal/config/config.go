@@ -440,6 +440,22 @@ func (c *Config) MediaAllowed(jid, name, kind string) bool {
 	return false
 }
 
+// MediaKindsFor lista os tipos de anexo que seriam baixados neste chat.
+//
+// Existe para o `wappsync groups` conseguir mostrar a política resolvida, com o
+// nome real do chat. Ler o TOML e tentar prever o que ele faz é justamente o
+// passo em que se erra — e o erro é silencioso, porque um chat sem política
+// simplesmente não baixa nada.
+func (c *Config) MediaKindsFor(jid, name string) []string {
+	var out []string
+	for _, k := range mediaKinds {
+		if c.MediaAllowed(jid, name, k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 func matches(pattern, jid, name string) bool {
 	p := strings.ToLower(strings.TrimSpace(pattern))
 	if p == "" {

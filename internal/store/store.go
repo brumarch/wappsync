@@ -312,6 +312,20 @@ func scanMessage(sc interface{ Scan(...any) error }) (Message, error) {
 	return m, err
 }
 
+// ChatName devolve o nome conhecido de um chat, ou "" se não houver.
+//
+// O banco sobrevive ao reinício e o mapa em memória não: depois de reiniciar,
+// o nome de um grupo só volta à memória quando o RefreshNames roda, alguns
+// segundos depois do Connected. Até lá, é daqui que ele vem.
+func (d *DB) ChatName(ctx context.Context, jid string) string {
+	var name string
+	err := d.sql.QueryRowContext(ctx, `SELECT name FROM chats WHERE jid = ?`, jid).Scan(&name)
+	if err != nil {
+		return ""
+	}
+	return name
+}
+
 // Since devolve todas as mensagens a partir de cutoff, ordenadas cronologicamente.
 func (d *DB) Since(ctx context.Context, cutoff time.Time) ([]Message, error) {
 	rows, err := d.sql.QueryContext(ctx,

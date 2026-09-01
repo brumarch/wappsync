@@ -346,6 +346,28 @@ enabled = true
 model = '/opt/whisper/ggml-small.bin'
 ```
 
+**Confira o que a configuração realmente faz** antes de esperar resultado. O
+`wappsync groups` mostra a política já resolvida por conversa:
+
+```
+$ wappsync groups
+  Família                     12 membros  120363...@g.us   anexos: image, document
+  Squad Backend                8 membros  120363...@g.us   anexos: nenhum
+```
+
+Ler o TOML e prever o efeito é o passo em que se erra, e o erro é silencioso —
+uma conversa sem política simplesmente não baixa nada.
+
+**Duas coisas que costumam confundir:**
+
+1. **Só vale para mensagens que chegarem depois de ligar.** A decisão de baixar
+   acontece quando a mensagem é recebida, e o protobuf com a chave da mídia não
+   é guardado. Mensagens que já estavam no banco não ganham anexo
+   retroativamente — espere chegar mídia nova para ver efeito.
+2. **`match` por nome depende de o nome ser conhecido.** O programa resolve pelo
+   banco quando a memória ainda não sabe, mas um grupo nunca nomeado só casa
+   por JID. Na dúvida, use o JID que o `wappsync groups` imprime.
+
 Transcrição precisa de dois binários no PATH: um
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (`whisper-cli`) e o
 `ffmpeg` — nota de voz é Opus, e o whisper.cpp só lê WAV 16 kHz mono. Faltando

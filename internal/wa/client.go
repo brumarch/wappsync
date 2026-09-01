@@ -322,7 +322,7 @@ func (c *Client) ingest(ctx context.Context, evt *events.Message, source string)
 	// Depois de gravar, nunca antes: o download termina num SetMedia, que não
 	// acha linha nenhuma se a mensagem ainda não existe — e o arquivo baixado
 	// viraria órfão na pasta.
-	if job, ok := c.mediaJobFor(m, evt.Message); ok {
+	if job, ok := c.mediaJobFor(m, evt.Message, c.chatName(ctx, m.ChatJID)); ok {
 		c.queueMediaJob(job)
 	}
 	_ = c.db.UpsertChat(ctx, msgstore.Chat{
@@ -459,7 +459,8 @@ func (c *Client) collectHistory(data *waHistorySync.HistorySync, parse parseWebF
 				continue
 			}
 			batch = append(batch, m)
-			if job, ok := c.mediaJobFor(m, parsed.Message); ok {
+			// O nome desta conversa foi gravado logo acima, antes do laço.
+			if job, ok := c.mediaJobFor(m, parsed.Message, c.getName(chatJID.String())); ok {
 				pending = append(pending, job)
 			}
 			if m.Timestamp.After(lastTS) {
@@ -514,6 +515,28 @@ func (c *Client) getName(jid string) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.names[jid]
+}
+
+// chatName resolve o melhor nome conhecido de um chat, caindo no banco quando a
+// memória ainda não sabe.
+//
+// O mapa em memória nasce vazio a cada execução e só é preenchido pelo
+// RefreshNames, que roda alguns segundos DEPOIS do Connected. Uma mensagem que
+// chegue nessa janela seria avaliada com nome vazio — e uma política escrita
+// como `match = "Família"` não casaria, sem que nada aparecesse no log. O banco
+// sobrevive ao reinício, então é ele que cobre o intervalo.
+func (c *Client) chatName(ctx context.Context, jid string) string {
+	if n := c.getName(jid); n != "" {
+		return n
+	}
+	if c.db == nil {
+		return ""
+	}
+	if n := c.db.ChatName(ctx, jid); n != "" {
+		c.setName(jid, n) // memoriza: a próxima mensagem do chat não consulta de novo
+		return n
+	}
+	return ""
 }
 
 // Groups devolve os grupos em que a conta está, ordenados por nome.

@@ -106,14 +106,14 @@ func TestAudioIsNotDownloadedWithoutTranscriber(t *testing.T) {
 	c.setName("fam@g.us", "Família")
 
 	m := msgstore.Message{ID: "M1", ChatJID: "fam@g.us", Timestamp: time.Now()}
-	if _, ok := c.mediaJobFor(m, audioMsg("audio/ogg", 30, 5000, true)); ok {
+	if _, ok := c.mediaJobFor(m, audioMsg("audio/ogg", 30, 5000, true), "Família"); ok {
 		t.Error("áudio foi enfileirado sem transcritor configurado")
 	}
 
 	// Com transcritor, o mesmo áudio passa — o que prova que a recusa acima
 	// veio da ausência dele, e não de outro filtro.
 	c.transcriber = &fakeTranscriber{texto: "oi"}
-	if _, ok := c.mediaJobFor(m, audioMsg("audio/ogg", 30, 5000, true)); !ok {
+	if _, ok := c.mediaJobFor(m, audioMsg("audio/ogg", 30, 5000, true), "Família"); !ok {
 		t.Error("áudio autorizado não foi enfileirado")
 	}
 }
@@ -132,10 +132,10 @@ func TestAudioRespectsMaxSeconds(t *testing.T) {
 
 	m := msgstore.Message{ID: "M1", ChatJID: "fam@g.us", Timestamp: time.Now()}
 
-	if _, ok := c.mediaJobFor(m, audioMsg("audio/ogg", 61, 5000, true)); ok {
+	if _, ok := c.mediaJobFor(m, audioMsg("audio/ogg", 61, 5000, true), "Família"); ok {
 		t.Error("áudio acima do limite de duração foi enfileirado")
 	}
-	if _, ok := c.mediaJobFor(m, audioMsg("audio/ogg", 60, 5000, true)); !ok {
+	if _, ok := c.mediaJobFor(m, audioMsg("audio/ogg", 60, 5000, true), "Família"); !ok {
 		t.Error("áudio exatamente no limite foi recusado")
 	}
 }

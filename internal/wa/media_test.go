@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -259,7 +260,7 @@ func TestMediaJobFor(t *testing.T) {
 			c.setName(famJID, "Família")
 
 			m := msgstore.Message{ID: "M1", ChatJID: famJID, Timestamp: time.Now()}
-			job, ok := c.mediaJobFor(m, tc.msg)
+			job, ok := c.mediaJobFor(m, tc.msg, "Família")
 			if ok != tc.want {
 				t.Fatalf("mediaJobFor = %v, queria %v", ok, tc.want)
 			}
@@ -282,7 +283,7 @@ func TestMediaJobNeedsIdentifiedMessage(t *testing.T) {
 		{ID: "", ChatJID: "g@g.us"},
 		{ID: "M1", ChatJID: ""},
 	} {
-		if _, ok := c.mediaJobFor(m, imageMsg("image/jpeg", 100)); ok {
+		if _, ok := c.mediaJobFor(m, imageMsg("image/jpeg", 100), "Família"); ok {
 			t.Errorf("job criado para mensagem sem chave: %+v", m)
 		}
 	}
@@ -318,5 +319,65 @@ func TestWriteMediaFileIsAtomicAndIdempotent(t *testing.T) {
 			names = append(names, e.Name())
 		}
 		t.Errorf("sobrou lixo na pasta de mídia: %v", names)
+	}
+}
+
+// Regressão. O mapa de nomes nasce vazio a cada execução e só é preenchido pelo
+// RefreshNames, alguns segundos depois do Connected. Antes desta correção, uma
+// mensagem que chegasse nessa janela era avaliada com nome vazio — e uma
+// política escrita como `match = "Família"` não casava com nada, sem que nada
+// aparecesse no log. O banco sobrevive ao reinício e cobre o intervalo.
+func TestChatNameFallsBackToDatabase(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	db, err := msgstore.Open(filepath.Join(dir, "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	const jid = "120363000000000000@g.us"
+	if err := db.UpsertChat(ctx, msgstore.Chat{JID: jid, Name: "Família", IsGroup: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	c := testClient(func(cfg *config.Config) {
+		cfg.Media = config.Media{Enabled: true, MaxFileMB: 20,
+			Chats: []config.MediaChat{{Match: "Família", Kinds: []string{"image"}}}}
+	})
+	c.db = db
+
+	// Memória vazia, como logo depois de subir o programa.
+	if n := c.getName(jid); n != "" {
+		t.Fatalf("o teste começou com o nome já em memória: %q", n)
+	}
+	if got := c.chatName(ctx, jid); got != "Família" {
+		t.Fatalf("chatName = %q, queria \"Família\" vindo do banco", got)
+	}
+
+	// E com o nome resolvido, o anexo passa a ser baixado.
+	m := msgstore.Message{ID: "M1", ChatJID: jid, Timestamp: time.Now()}
+	if _, ok := c.mediaJobFor(m, imageMsg("image/jpeg", 1000), c.chatName(ctx, jid)); !ok {
+		t.Error("anexo continua sendo pulado mesmo com o nome no banco")
+	}
+
+	// Memoriza: a próxima mensagem do mesmo chat não consulta o banco de novo.
+	if n := c.getName(jid); n != "Família" {
+		t.Errorf("nome não foi memorizado: %q", n)
+	}
+}
+
+// Chat que ninguém nomeou não pode derrubar a decisão — casar por JID continua
+// funcionando, que é o contorno recomendado quando o nome não é conhecido.
+func TestJIDMatchWorksWithoutName(t *testing.T) {
+	const jid = "120363000000000000@g.us"
+	c := testClient(func(cfg *config.Config) {
+		cfg.Media = config.Media{Enabled: true, MaxFileMB: 20,
+			Chats: []config.MediaChat{{Match: jid, Kinds: []string{"image"}}}}
+	})
+
+	m := msgstore.Message{ID: "M1", ChatJID: jid, Timestamp: time.Now()}
+	if _, ok := c.mediaJobFor(m, imageMsg("image/jpeg", 1000), ""); !ok {
+		t.Error("match por JID exato falhou com o nome desconhecido")
 	}
 }

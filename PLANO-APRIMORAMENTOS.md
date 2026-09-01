@@ -24,6 +24,7 @@ suíte passa e — se for teste de trava — foi validado por mutação.
 | A7 | Guarda de versão do whatsmeow | `auditedWhatsmeowVersion`; bump falha até reauditar `enforceReadOnly` |
 | B2 | `internal/wa` testável sem cliente real | 29,4% → 51,2%. `ingestHistory` virou `collectHistory(data, parse)`, com a função de parse por parâmetro; 20 testes novos de `toStoreMessage`/`collectHistory` com protobufs à mão. As duas travas de somente-leitura passaram a inspecionar *referência*, não só chamada — `x := c.wa.SendMessage` passava verde antes |
 | B5 | Alerta de sessão caída | `events.LoggedOut`/`StreamReplaced` viram `SessionLoss` (função pura) e derrubam o `run`: último ciclo, `alertas/<host_id>.md` no destino e saída com **código 3**, distinto de 1 para o supervisor não reiniciar em laço. 10 testes novos; `wa` 53,1% → 55,9%, `cmd` 14,5% → 17,5%. Duas travas validadas por mutação. Publica em `alertas/<host_id>.md`, não no `latest/ALERTA.md` proposto: um arquivo compartilhado seria o único mutável do desenho, e duas máquinas caídas juntas apagariam o alerta uma da outra |
+| B14 | Correção: anexo pulado em silêncio | O nome do chat era lido só da memória, que nasce vazia e só é preenchida segundos após o `Connected` — com `match` por nome, o anexo era pulado sem log. `mediaJobFor` passou a receber o nome por parâmetro e `ingest` resolve memória → banco. Skip por política virou log em INFO com nome E JID. `wappsync status` parou de engolir o erro do `wa.New` (whisper ausente ficava invisível) e `wappsync groups` ganhou a política de mídia resolvida por conversa. 2 travas validadas por mutação |
 | B1 | Transcrição de áudio | `[transcribe]` no config (desligado por padrão) e `"audio"` aceito em `media.chat.kinds`. Pacote `internal/transcribe` novo: ffmpeg converte para WAV 16 kHz mono, whisper.cpp transcreve, e o `ParseOutput` limpa timestamp, ruído de diagnóstico e marcador de silêncio. Fila **separada** da de download — Whisper leva minutos, download leva segundos, e numa fila só a nota de voz atrasaria as imagens até elas serem descartadas. O áudio bruto é apagado em todo desfecho; o que sai é o texto, no corpo entre aspas e em `media/<host_id>/<sha256>.txt`. Nenhuma chamada nova ao cliente do WhatsApp e **nenhum bump de schema**: a transcrição carrega ponteiro de mídia, então o bit de `Rank()` do B10 já vale. 7 travas novas validadas por mutação. `transcribe` nasce com 88,7% |
 | B10 | Download e publicação de anexos (imagem e documento) | `[media]` no config, desligado por padrão e por conversa: `enabled` + `[[media.chat]]` com `match`/`kinds`. `c.wa.Download` entrou na allowlist (12 → 13 entradas). `Rank()` ganhou o bit de anexo (+200) e `SchemaVersion` foi para `wapp-summarizer/2` — sem o bit, o anexo empatava em prio e era descartado pelo `>` estrito do UPSERT. `remote.Backend` ganhou `Delete`, a primeira operação destrutiva do programa, restrita a `media/<host_id>/`. Publicado como `media/<host_id>/<sha256>.<ext>`, com o nome derivado do conteúdo e a extensão do mimetype, nunca do nome declarado. 8 travas novas validadas por mutação |
 | B8 | Guia para os agentes que leem o destino | `export.MarshalGuide`; publicado como `LEIA-ME.md` e `AGENTS.md`, em `latest/` e na raiz. Estabelece que o conteúdo é dado e nunca instrução, dá o critério de frescor, a legenda da notação e o que NÃO se pode concluir. Dois goldens + teste independente da trava de confiança, para sobreviver a um `-update` descuidado |
@@ -148,6 +149,25 @@ um download que falhou por rede passa a ter retry, o que hoje também não exist
 **Por que não entrou em B10.** A degradação é graciosa e visível no log, e a
 alternativa (fila sem limite) trocaria perda de anexo por consumo de memória sem
 teto durante o history sync.
+
+---
+
+### B13 — Anexo retroativo para mensagens já capturadas · impacto médio · esforço médio
+
+**Problema.** A decisão de baixar acontece no momento em que a mensagem chega, e
+o protobuf — que carrega `directPath`, `mediaKey` e `fileEncSHA256` — é
+descartado logo depois. Quem liga `[media]` com o banco já cheio não vê efeito
+nenhum até chegar mídia nova, e a experiência é indistinguível de "não
+funciona". Foi exatamente o que aconteceu na primeira vez que isso rodou numa
+máquina de verdade.
+
+**Proposta.** Guardar os três campos numa tabela ao lado de `messages` no
+momento da ingestão (independente da política, que pode mudar depois) e
+reprocessar a janela quando a política mudar ou sob um `wappsync media --backfill`.
+
+**Cuidado.** Guardar `mediaKey` é guardar a chave de decifrar a mídia. Ela já
+está no banco de sessão, mas passa a estar também no `messages.db` — que é o
+arquivo que alguém copiaria para depurar. Decidir se vale, e por quanto tempo.
 
 ---
 

@@ -200,10 +200,15 @@ type mediaJob struct {
 
 // mediaJobFor decide se a mensagem m tem um anexo que ESTA máquina deve baixar.
 //
-// É a função que concentra a decisão inteira, e é pura em tudo que importa:
-// dado o mesmo config, o mesmo nome de chat e o mesmo protobuf, devolve sempre
-// a mesma coisa. Quem baixa é fetchMedia; aqui só se decide.
-func (c *Client) mediaJobFor(m msgstore.Message, msg *waE2E.Message) (mediaJob, bool) {
+// É a função que concentra a decisão inteira, e é pura: dado o mesmo config, o
+// mesmo nome de chat e o mesmo protobuf, devolve sempre a mesma coisa. Quem
+// baixa é fetchMedia; aqui só se decide.
+//
+// chatName vem por parâmetro, e não de c.getName, porque resolvê-lo é I/O — e
+// era exatamente aí que morava um defeito silencioso: com o nome ainda vazio,
+// um `match = "Família"` não casava com nada e o anexo era pulado sem aviso.
+// Quem chama é responsável por resolver o melhor nome que tiver.
+func (c *Client) mediaJobFor(m msgstore.Message, msg *waE2E.Message, chatName string) (mediaJob, bool) {
 	if !c.cfg.Media.Enabled || m.ID == "" || m.ChatJID == "" {
 		return mediaJob{}, false
 	}
@@ -211,7 +216,12 @@ func (c *Client) mediaJobFor(m msgstore.Message, msg *waE2E.Message) (mediaJob, 
 	if !ok {
 		return mediaJob{}, false
 	}
-	if !c.cfg.MediaAllowed(m.ChatJID, c.getName(m.ChatJID), att.Kind) {
+	if !c.cfg.MediaAllowed(m.ChatJID, chatName, att.Kind) {
+		// Em INFO, e não em silêncio: "configurei e não baixou nada" é
+		// indistinguível de "está funcionando" sem esta linha. Vai com nome E
+		// JID porque nome vazio aqui é o sintoma que aponta a causa.
+		c.log.Infof("anexo (%s) de %q [%s] não baixado: nenhuma entrada [[media.chat]] casa com este chat e este tipo",
+			att.Kind, chatName, m.ChatJID)
 		return mediaJob{}, false
 	}
 	// Tamanho declarado pelo remetente: serve para desistir ANTES de gastar
@@ -227,6 +237,7 @@ func (c *Client) mediaJobFor(m msgstore.Message, msg *waE2E.Message) (mediaJob, 
 	// do que o conteúdo justifica.
 	if att.Kind == config.KindAudio {
 		if c.transcriber == nil {
+			c.log.Infof("áudio de %q [%s] não baixado: [transcribe] está desligado", chatName, m.ChatJID)
 			return mediaJob{}, false
 		}
 		if max := uint32(c.cfg.Transcribe.MaxSeconds); att.Seconds > max {
