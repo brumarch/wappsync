@@ -201,7 +201,7 @@ Aponte o agente para `<pasta>/wapp-summarizer/latest/`:
 | `digest.md` | Histórico legível, agrupado por conversa e por dia. É o arquivo para resumos e briefings. |
 | `messages.jsonl` | Uma mensagem por linha, canônico. Para filtrar, contar e processar. |
 | `LEIA-ME.md` e `AGENTS.md` | O guia do agente, mesmo conteúdo em dois nomes. Gerado junto, também na raiz da pasta. |
-| `../alertas/<host>.md` | Só existe quando uma máquina perdeu o pareamento. Diz quando ela parou, e como saber se o aviso ainda vale. |
+| `../alertas/<host>.md` | Só existe enquanto uma máquina está com o pareamento caído — ela apaga o próprio aviso ao voltar a publicar. Diz quando parou e como conferir se ainda vale. |
 
 Uma linha de `messages.jsonl`:
 

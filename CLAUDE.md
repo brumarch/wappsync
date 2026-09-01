@@ -60,10 +60,13 @@ só passa a escolher a versão errada da mensagem, em silêncio. Quem cobra isso
 `TestRankFormulaIsPinnedToSchemaVersion`, que fixa a tabela de prioridades e a
 versão de schema no mesmo lugar.
 
-`remote.Backend.Delete` é a **única operação destrutiva** do programa. Só é
-chamada na poda de `media/<host_id>/`, só alcança arquivo da própria máquina, e
-recusa caminho com `..` em duas camadas (`mediaNameFor` e `safeRelPath`) porque
-o caminho vem de um JSONL que mora na pasta compartilhada.
+`remote.Backend.Delete` é a **única operação destrutiva** do programa, e tem
+exatamente dois usos: a poda de `media/<host_id>/` e a limpeza de
+`alertas/<host_id>.md` quando a máquina volta a publicar. Os dois só alcançam
+arquivo da própria máquina — apagar o alerta de outra afirmaria, sem base, que
+o buraco no histórico dela acabou. Na poda, o caminho ainda passa por duas
+camadas de recusa a `..` (`mediaNameFor` e `safeRelPath`), porque ali ele vem
+de um JSONL que mora na pasta compartilhada.
 
 ## Comandos
 

@@ -270,9 +270,19 @@ func cmdRun(ctx context.Context, cfg *config.Config, verbose, once bool) error {
 	case <-time.After(20 * time.Second):
 	}
 
+	alertaLimpo := false
 	for {
 		if err := cycle(ctx, cfg, db, deviceJID, time.Now()); err != nil {
 			fmt.Fprintf(os.Stderr, "ciclo falhou: %v\n", err)
+		} else if !alertaLimpo {
+			// Depois do primeiro ciclo que deu certo, e não no Connect:
+			// conectar não é o mesmo que voltar a capturar e publicar. Apagar
+			// no Connect faria o aviso sumir antes de a máquina provar que
+			// voltou — e num laço de reconexão sumiria a cada tentativa.
+			if err := clearAlert(ctx, cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "aviso: não consegui limpar o alerta anterior: %v\n", err)
+			}
+			alertaLimpo = true
 		}
 		if once {
 			return nil
@@ -338,7 +348,7 @@ func publishAlert(ctx context.Context, cfg *config.Config, a export.Alert) (stri
 	if err := os.MkdirAll(cfg.OutDir(), 0o700); err != nil {
 		return "", err
 	}
-	local := filepath.Join(cfg.OutDir(), "ALERTA.md")
+	local := localAlertPath(cfg)
 	if err := os.WriteFile(local, body, 0o600); err != nil {
 		return "", err
 	}
@@ -355,6 +365,33 @@ func publishAlert(ctx context.Context, cfg *config.Config, a export.Alert) (stri
 		return local, err
 	}
 	return rel, nil
+}
+
+// localAlertPath é a cópia local do alerta desta máquina.
+func localAlertPath(cfg *config.Config) string {
+	return filepath.Join(cfg.OutDir(), "ALERTA.md")
+}
+
+// clearAlert remove o alerta desta máquina, no destino e na cópia local.
+//
+// Um aviso que fica para sempre é indistinguível de um aviso atual: quem lê a
+// pasta meses depois não tem como saber se aquela máquina voltou. Até B10 não
+// dava para apagar — o backend não tinha Delete —, e o alerta passou a carregar
+// o próprio critério de validade (comparar o generated_at do shard com a hora
+// do aviso). Isso continua valendo como segunda linha, mas exige que o leitor
+// faça a conta. Apagar é melhor sinal.
+//
+// Só toca no arquivo DESTA máquina. O alerta de outra continua de pé: quem caiu
+// foi ela, e daqui não há como saber se voltou.
+func clearAlert(ctx context.Context, cfg *config.Config) error {
+	if err := os.Remove(localAlertPath(cfg)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	be, err := remote.New(cfg)
+	if err != nil || be == nil {
+		return err
+	}
+	return be.Delete(ctx, export.AlertFile(cfg.HostID))
 }
 
 func cmdExport(ctx context.Context, cfg *config.Config) error {

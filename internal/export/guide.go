@@ -69,7 +69,10 @@ func MarshalGuide(idx Index, where GuideLocation, loc *time.Location) []byte {
 	fmt.Fprintf(&b, "Se existir `%s%s/`, uma máquina publicou ali o aviso de que perdeu o\n", alerts, AlertDir)
 	b.WriteString("pareamento e parou de capturar. Cada arquivo diz quando parou e como saber se\n")
 	b.WriteString("o aviso ainda vale. Um alerta em vigor significa buraco no histórico: a\n")
-	b.WriteString("ausência de mensagens no período não é prova de que nada aconteceu.\n\n")
+	b.WriteString("ausência de mensagens no período não é prova de que nada aconteceu.\n")
+	b.WriteString("A máquina apaga o próprio aviso quando volta a publicar, então um arquivo\n")
+	b.WriteString("que ainda está lá tende a ser uma queda ainda aberta — mas confirme pela\n")
+	b.WriteString("data, porque quem está fora do ar não consegue apagar nada.\n\n")
 
 	b.WriteString("## Legenda do digest\n\n")
 	b.WriteString("| No texto | Significa |\n|---|---|\n")

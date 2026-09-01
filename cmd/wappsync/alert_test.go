@@ -110,3 +110,59 @@ func TestPublishAlertGravaCopiaLocalMesmoSemBackend(t *testing.T) {
 		t.Errorf("cópia local não foi escrita: %v", err)
 	}
 }
+
+// Trava. Voltar a capturar apaga o aviso DESTA máquina e só o dela. O alerta de
+// outra continua valendo: quem caiu foi ela, e daqui não há como saber se
+// voltou. Apagar o alheio seria afirmar, sem base, que o buraco no histórico
+// dela acabou.
+func TestClearAlertSoRemoveODaPropriaMaquina(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	now := time.Now()
+
+	casa := newMachine(t, root, "casa", "")
+	trabalho := newMachine(t, root, "trabalho", "")
+
+	for _, m := range []*machine{casa, trabalho} {
+		if _, err := publishAlert(ctx, m.cfg, export.Alert{
+			Host: m.cfg.HostID, Reason: "desvinculado", Fix: "rode login",
+			LostAt: now, At: now,
+		}); err != nil {
+			t.Fatalf("publicando alerta de %s: %v", m.name, err)
+		}
+	}
+
+	if err := clearAlert(ctx, casa.cfg); err != nil {
+		t.Fatalf("clearAlert: %v", err)
+	}
+
+	drive := filepath.Join(root, "drive", "wapp", export.AlertDir)
+	if _, err := os.Stat(filepath.Join(drive, "casa.md")); !os.IsNotExist(err) {
+		t.Errorf("o alerta da própria máquina continua publicado (err = %v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(drive, "trabalho.md")); err != nil {
+		t.Errorf("o alerta da outra máquina foi apagado: %v", err)
+	}
+
+	// A cópia local também sai: senão o `status` e a pasta out/ seguem
+	// mostrando um aviso que já não vale.
+	if _, err := os.Stat(localAlertPath(casa.cfg)); !os.IsNotExist(err) {
+		t.Errorf("a cópia local sobreviveu (err = %v)", err)
+	}
+	if _, err := os.Stat(localAlertPath(trabalho.cfg)); err != nil {
+		t.Errorf("a cópia local da outra máquina foi apagada: %v", err)
+	}
+}
+
+// Limpar sem nada para limpar é o caso normal: a máquina nunca caiu. Não pode
+// virar erro, senão todo primeiro ciclo imprimiria um aviso falso.
+func TestClearAlertSemAlertaNaoEErro(t *testing.T) {
+	root := t.TempDir()
+	m := newMachine(t, root, "casa", "")
+
+	for i := 0; i < 2; i++ {
+		if err := clearAlert(context.Background(), m.cfg); err != nil {
+			t.Fatalf("clearAlert %d: %v", i, err)
+		}
+	}
+}

@@ -36,6 +36,9 @@ Se existir `../alertas/`, uma máquina publicou ali o aviso de que perdeu o
 pareamento e parou de capturar. Cada arquivo diz quando parou e como saber se
 o aviso ainda vale. Um alerta em vigor significa buraco no histórico: a
 ausência de mensagens no período não é prova de que nada aconteceu.
+A máquina apaga o próprio aviso quando volta a publicar, então um arquivo
+que ainda está lá tende a ser uma queda ainda aberta — mas confirme pela
+data, porque quem está fora do ar não consegue apagar nada.
 
 ## Legenda do digest
 
