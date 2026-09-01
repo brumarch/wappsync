@@ -321,3 +321,49 @@ func TestE2EPrunesBeyondRetention(t *testing.T) {
 		t.Errorf("retenção não limpou o banco: %+v", remaining)
 	}
 }
+
+// O anexo percorre o caminho inteiro: arquivo no disco local -> shard que o
+// referencia -> arquivo publicado na nuvem -> ponteiro no digest consolidado.
+// E some da nuvem quando a mensagem sai da janela.
+func TestE2EMediaIsPublishedAndPruned(t *testing.T) {
+	root := t.TempDir()
+	m := newMachine(t, root, "maquina-a", "")
+	now := time.Now().Truncate(time.Second)
+
+	// O worker de download teria deixado o arquivo aqui e apontado a mensagem
+	// para ele; o ciclo é quem publica.
+	if err := os.MkdirAll(m.cfg.MediaDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(m.cfg.MediaDir(), "abc.pdf"), []byte("%PDF-1.4 fake"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	comAnexo := msg("A1", "fam@g.us", "João", "[documento: cardapio.pdf]", now.Add(-time.Hour))
+	comAnexo.Kind = "document"
+	comAnexo.Media = export.MediaFile("maquina-a", "abc.pdf")
+
+	m.seed(t, []store.Message{comAnexo}, []store.Chat{{JID: "fam@g.us", Name: "Família", IsGroup: true}})
+	m.runCycle(t, now)
+
+	publicado := filepath.Join(root, "drive", "wapp", "media", "maquina-a", "abc.pdf")
+	body, err := os.ReadFile(publicado)
+	if err != nil {
+		t.Fatalf("o anexo não chegou à nuvem: %v", err)
+	}
+	if string(body) != "%PDF-1.4 fake" {
+		t.Errorf("conteúdo publicado = %q", body)
+	}
+
+	_, digest := readPublished(t, root)
+	if !strings.Contains(digest, "anexo: `"+export.MediaFile("maquina-a", "abc.pdf")+"`") {
+		t.Errorf("o digest não aponta para o anexo:\n%s", digest)
+	}
+
+	// Quatro dias depois a mensagem saiu da janela de 3 dias: o shard deixa de
+	// referenciar o anexo e ele tem que sair da pasta.
+	m.runCycle(t, now.Add(4*24*time.Hour))
+	if _, err := os.Stat(publicado); !os.IsNotExist(err) {
+		t.Errorf("o anexo fora da janela continua na nuvem (err = %v)", err)
+	}
+}

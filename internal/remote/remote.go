@@ -25,6 +25,26 @@ import (
 // ErrNotExist é devolvido por Get quando o arquivo não existe no destino.
 var ErrNotExist = os.ErrNotExist
 
+// ErrUnsafePath recusa um caminho que sairia da raiz do destino.
+//
+// Delete é a única operação destrutiva desta interface, e os caminhos que
+// chegam nela derivam de arquivos lidos da pasta compartilhada. Um ".." ali
+// apagaria o consolidado em vez de um anexo.
+var ErrUnsafePath = errors.New("caminho relativo inseguro")
+
+// safeRelPath recusa caminho absoluto, vazio ou com "..".
+func safeRelPath(relPath string) error {
+	if relPath == "" || strings.HasPrefix(relPath, "/") || strings.Contains(relPath, "\\") {
+		return fmt.Errorf("%w: %q", ErrUnsafePath, relPath)
+	}
+	for _, part := range strings.Split(relPath, "/") {
+		if part == ".." {
+			return fmt.Errorf("%w: %q", ErrUnsafePath, relPath)
+		}
+	}
+	return nil
+}
+
 type Backend interface {
 	// Put grava data em relPath (caminho relativo com "/"), atomicamente quando possível.
 	Put(ctx context.Context, relPath string, data []byte) error
@@ -32,6 +52,8 @@ type Backend interface {
 	Get(ctx context.Context, relPath string) ([]byte, error)
 	// List lista os arquivos diretamente sob relDir (nomes, não caminhos).
 	List(ctx context.Context, relDir string) ([]string, error)
+	// Delete remove relPath. Apagar o que não existe não é erro.
+	Delete(ctx context.Context, relPath string) error
 	// Describe é uma descrição legível do destino, para logs.
 	Describe() string
 }
@@ -99,6 +121,16 @@ func (f *folder) Put(_ context.Context, relPath string, data []byte) error {
 		if err := os.Rename(tmpName, dst); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (f *folder) Delete(_ context.Context, relPath string) error {
+	if err := safeRelPath(relPath); err != nil {
+		return err
+	}
+	if err := os.Remove(f.abs(relPath)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }
@@ -172,6 +204,17 @@ func (r *rclone) Put(ctx context.Context, relPath string, data []byte) error {
 
 func (r *rclone) Get(ctx context.Context, relPath string) ([]byte, error) {
 	return r.run(ctx, nil, "cat", r.remotePath(relPath))
+}
+
+func (r *rclone) Delete(ctx context.Context, relPath string) error {
+	if err := safeRelPath(relPath); err != nil {
+		return err
+	}
+	_, err := r.run(ctx, nil, "deletefile", r.remotePath(relPath))
+	if errors.Is(err, ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func (r *rclone) List(ctx context.Context, relDir string) ([]string, error) {

@@ -66,6 +66,14 @@ func TestDigestGolden(t *testing.T) {
 			SenderName: "João", IsGroup: true, Timestamp: at(-1, 20, 5),
 			Kind: "image", Body: "[imagem] o bolo ficou assim", Source: "live",
 		},
+		// Documento com anexo baixado: a linha tem que trazer o caminho, e é
+		// esse ponteiro que faz o agente abrir o arquivo em vez de adivinhar.
+		{
+			ID: "F5", ChatJID: "120363000000000001@g.us", SenderJID: "5511900000003@s.whatsapp.net",
+			SenderName: "Maria", IsGroup: true, Timestamp: at(-1, 20, 12),
+			Kind: "document", Body: "[documento: cardapio.pdf]", Source: "live",
+			Media: "media/bruno-win/9f2c4e1a.pdf",
+		},
 		// Mensagem apagada: tem que aparecer riscada.
 		{
 			ID: "F4", ChatJID: "120363000000000001@g.us", SenderJID: "5511900000003@s.whatsapp.net",
@@ -104,7 +112,7 @@ func TestDigestGolden(t *testing.T) {
 	recs := Build(cfg, msgs, chats, from)
 	idx := BuildIndex(cfg, recs, from, now, cfg.HostID)
 	idx.Shards = []ShardMeta{
-		{Host: "bruno-win", Schema: SchemaVersion, Messages: 9, GeneratedAt: now},
+		{Host: "bruno-win", Schema: SchemaVersion, Messages: 10, GeneratedAt: now},
 		{Host: "bruno-mac", Schema: SchemaVersion, Messages: 7, GeneratedAt: now.Add(-5 * time.Minute)},
 	}
 

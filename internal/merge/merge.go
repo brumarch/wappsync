@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -51,6 +53,27 @@ var guideFiles = map[string]export.GuideLocation{
 	"AGENTS.md":         export.GuideAtRoot,
 	"latest/LEIA-ME.md": export.GuideInLatest,
 	"latest/AGENTS.md":  export.GuideInLatest,
+}
+
+// mediaPrefix é a pasta de anexos DESTA máquina.
+func mediaPrefix(host string) string { return export.MediaDir + "/" + host }
+
+// mediaNameFor extrai o nome do arquivo de um caminho de anexo desta máquina,
+// recusando qualquer coisa que não seja um nome simples.
+//
+// O caminho vem de um JSONL que mora na pasta compartilhada, então é dado de
+// fora: qualquer processo com acesso à pasta pode ter escrito ali. Sem esta
+// checagem, um "media/<host>/../../latest/index.json" viraria um Delete no
+// consolidado — a poda abaixo é a única operação destrutiva do programa.
+func mediaNameFor(prefix, rel string) (string, bool) {
+	name, ok := strings.CutPrefix(rel, prefix+"/")
+	if !ok || name == "" {
+		return "", false
+	}
+	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+		return "", false
+	}
+	return name, true
 }
 
 func shardData(host string) string { return shardsDir + "/" + host + ".jsonl" }
@@ -144,6 +167,102 @@ func PublishShard(ctx context.Context, cfg *config.Config, be remote.Backend, lo
 		return meta, fmt.Errorf("publicando meta do shard: %w", err)
 	}
 	return meta, nil
+}
+
+// MediaResult resume uma rodada de sincronização de anexos.
+type MediaResult struct {
+	Uploaded int
+	Pruned   int
+	Missing  int // referenciado pelo shard, mas sem o arquivo no disco local
+}
+
+// PublishMedia acerta os anexos desta máquina com o que o shard dela
+// referencia: sobe o que falta e apaga o que saiu da janela.
+//
+// A fonte da verdade é o shard JÁ PUBLICADO, não o banco local. Se o banco for
+// apagado e o pareamento refeito, o shard remoto continua referenciando anexos
+// que precisam continuar existindo — é a mesma razão de PublishShard fundir com
+// o remoto antes de subir.
+//
+// keepLocalAfter protege a cópia local recém-baixada: o worker de download
+// grava o arquivo e só depois aponta a mensagem para ele, então um arquivo novo
+// pode legitimamente ainda não estar em shard nenhum. Podar por referência
+// apenas apagaria justamente o que acabou de chegar.
+func PublishMedia(ctx context.Context, cfg *config.Config, be remote.Backend, localDir string, keepLocalAfter time.Time) (MediaResult, error) {
+	var res MediaResult
+	prefix := mediaPrefix(cfg.HostID)
+
+	wanted := map[string]bool{}
+	data, err := be.Get(ctx, shardData(cfg.HostID))
+	if err == nil {
+		recs, _ := export.UnmarshalJSONL(data)
+		for _, r := range recs {
+			if name, ok := mediaNameFor(prefix, r.Media); ok {
+				wanted[name] = true
+			}
+		}
+	} else if !errors.Is(err, remote.ErrNotExist) {
+		return res, fmt.Errorf("lendo shard para os anexos: %w", err)
+	}
+
+	present, err := be.List(ctx, prefix)
+	if err != nil {
+		return res, fmt.Errorf("listando anexos publicados: %w", err)
+	}
+	have := make(map[string]bool, len(present))
+	for _, name := range present {
+		have[name] = true
+	}
+
+	for name := range wanted {
+		if have[name] {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(localDir, name))
+		if err != nil {
+			// O arquivo pode ter sido baixado por uma execução anterior cuja
+			// pasta local sumiu. Não é motivo para abortar o ciclo: o registro
+			// continua válido, só perde o anexo.
+			res.Missing++
+			continue
+		}
+		if err := be.Put(ctx, prefix+"/"+name, body); err != nil {
+			return res, fmt.Errorf("publicando anexo %s: %w", name, err)
+		}
+		res.Uploaded++
+	}
+
+	for name := range have {
+		if wanted[name] {
+			continue
+		}
+		if err := be.Delete(ctx, prefix+"/"+name); err != nil {
+			return res, fmt.Errorf("removendo anexo %s: %w", name, err)
+		}
+		res.Pruned++
+	}
+
+	pruneLocalMedia(localDir, wanted, keepLocalAfter)
+	return res, nil
+}
+
+// pruneLocalMedia apaga a cópia local do que já não é referenciado. Erros são
+// ignorados de propósito: é limpeza de disco, não parte da publicação.
+func pruneLocalMedia(dir string, wanted map[string]bool, keepAfter time.Time) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || wanted[e.Name()] {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(keepAfter) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, e.Name()))
+	}
 }
 
 type Result struct {

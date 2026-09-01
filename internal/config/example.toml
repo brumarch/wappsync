@@ -36,7 +36,8 @@ include_from_me = true
 include_status_broadcast = false
 include_newsletters = false
 
-# Mídia nunca é baixada. Com isto ligado, vira um marcador: "[imagem] legenda".
+# Marcador para mensagem que só tem mídia: "[imagem] legenda".
+# Desligado, essas mensagens somem do export. Ver [media] para baixar o arquivo.
 media_placeholders = true
 
 # Corta mensagens gigantes (0 = sem limite).
@@ -61,6 +62,31 @@ redact_phone_numbers = false
 redact_patterns = [
   # '\d{3}\.\d{3}\.\d{3}-\d{2}',
 ]
+
+[media]
+# Baixar anexos e publicá-los junto com as mensagens, para o agente abrir.
+#
+# ATENÇÃO: isto muda o que sai desta máquina. Sem [media], só TEXTO vai para a
+# nuvem. Com [media], as imagens e os documentos dos chats listados abaixo vão
+# junto — e quem tem acesso à pasta passa a ver o arquivo, não só a legenda.
+#
+# Desligado, nada é baixado, independentemente do resto desta seção.
+enabled = false
+
+# Anexo maior que isto é ignorado (fica só o marcador).
+max_file_mb = 20
+
+# Por chat, e SÓ nos chats listados. Chat ausente daqui não baixa nada.
+# match: JID completo ou pedaço do nome, igual a [filter].
+# kinds: "image" e/ou "document". (Áudio ainda não; depende de transcrição.)
+#
+# [[media.chat]]
+# match = "Família"
+# kinds = ["image", "document"]
+#
+# [[media.chat]]
+# match = "120363000000000000@g.us"
+# kinds = ["document"]
 
 [remote]
 # "folder"  -> escreve numa pasta local que o app do Google Drive/OneDrive/Dropbox sincroniza.

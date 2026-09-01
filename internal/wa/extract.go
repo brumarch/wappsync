@@ -32,22 +32,10 @@ func describe(msg *waE2E.Message, depth int) Content {
 		return c
 	}
 
-	// Invólucros: desembrulha e reprocessa.
-	for _, wrapped := range []*waE2E.FutureProofMessage{
-		msg.GetEphemeralMessage(),
-		msg.GetViewOnceMessage(),
-		msg.GetViewOnceMessageV2(),
-		msg.GetViewOnceMessageV2Extension(),
-		msg.GetDocumentWithCaptionMessage(),
-		msg.GetGroupMentionedMessage(),
-		msg.GetLottieStickerMessage(),
-	} {
-		if wrapped.GetMessage() != nil {
-			return describe(wrapped.GetMessage(), depth+1)
-		}
-	}
-	if dsm := msg.GetDeviceSentMessage(); dsm.GetMessage() != nil {
-		return describe(dsm.GetMessage(), depth+1)
+	// Invólucros: desembrulha e reprocessa. A lista mora em unwrapOnce porque
+	// attachmentOf precisa descascar exatamente a mesma coisa.
+	if inner := unwrapOnce(msg); inner != nil {
+		return describe(inner, depth+1)
 	}
 
 	// Edições e revogações vêm dentro de ProtocolMessage.

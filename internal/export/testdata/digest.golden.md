@@ -1,9 +1,9 @@
 # WhatsApp — últimos 3 dia(s)
 
 - Janela: **2026-03-12 18:30** → **2026-03-15 18:30** (horários em UTC+00:00)
-- Mensagens: **9** em **3** conversa(s)
+- Mensagens: **10** em **3** conversa(s)
 - Gerado por: `bruno-win` em 2026-03-15T18:30:00Z
-- Máquinas contribuindo: `bruno-win` (9 msgs, 15/03 18:30), `bruno-mac` (7 msgs, 15/03 18:25)
+- Máquinas contribuindo: `bruno-win` (10 msgs, 15/03 18:30), `bruno-mac` (7 msgs, 15/03 18:25)
 
 ---
 
@@ -11,7 +11,7 @@
 
 - Ana Souza (DM) — 2 msgs, última 15/03 14:30
 - Squad Backend (grupo) — 3 msgs, última 15/03 11:20
-- Família (grupo) — 4 msgs, última 14/03 20:30
+- Família (grupo) — 5 msgs, última 14/03 20:30
 
 ---
 
@@ -32,7 +32,7 @@
 - `11:15` **eu**: revisando agora [editada]
 - `11:20` **Ana**: [áudio (voz) 47s]
 
-## Família (grupo) — 4 mensagens
+## Família (grupo) — 5 mensagens
 <!-- jid: 120363000000000001@g.us -->
 
 ### 2026-03-13
@@ -43,4 +43,5 @@
 ### 2026-03-14
 
 - `20:05` **João**: [imagem] o bolo ficou assim
+- `20:12` **Maria**: [documento: cardapio.pdf] · anexo: `media/bruno-win/9f2c4e1a.pdf`
 - `20:30` **Maria**: ~~[mensagem apagada]~~

@@ -28,7 +28,7 @@ import (
 // O segundo caso é o mais traiçoeiro: prioridades calculadas por fórmulas
 // diferentes continuam sendo números comparáveis, então nada quebra — o merge
 // apenas passa a escolher a versão errada da mensagem, em silêncio.
-const SchemaVersion = "wapp-summarizer/1"
+const SchemaVersion = "wapp-summarizer/2"
 
 // legacySchema é o que assumimos para um shard publicado antes de o campo
 // Schema existir. Evita um flag day sem enfraquecer a checagem daqui em diante.
@@ -42,6 +42,16 @@ func SchemaCompatible(schema string) bool {
 	}
 	return schema == SchemaVersion
 }
+
+// MediaDir é a pasta dos anexos no destino, ao lado de shards/ e latest/.
+const MediaDir = "media"
+
+// MediaFile é o caminho publicado de um anexo, relativo à raiz do destino.
+//
+// Uma subpasta por máquina, como shards/<host>.jsonl e alertas/<host>.md: sem
+// arquivo compartilhado não existe lost update, e cada máquina consegue podar
+// os próprios anexos sem tocar no que é das outras.
+func MediaFile(host, name string) string { return MediaDir + "/" + host + "/" + name }
 
 // Record é uma mensagem no formato publicado. Uma linha de JSONL.
 type Record struct {
@@ -59,6 +69,12 @@ type Record struct {
 	ReplyText  string    `json:"reply_text,omitempty"`
 	Edited     bool      `json:"edited,omitempty"`
 	Deleted    bool      `json:"deleted,omitempty"`
+
+	// Media é o caminho relativo do anexo publicado, ex.
+	// "media/bruno-win/ab12....jpg", relativo à raiz do destino — não a
+	// latest/. O agente abre o arquivo por este caminho; ausente significa
+	// que o anexo não foi baixado, não que a mensagem não tinha um.
+	Media string `json:"media,omitempty"`
 
 	// Prio é a precedência desta versão do registro. Usada no merge entre
 	// máquinas para decidir quem vence; não é conteúdo.
@@ -140,6 +156,7 @@ func Build(cfg *config.Config, msgs []store.Message, chats map[string]store.Chat
 			ReplyText:  cfg.Redact(m.QuotedText),
 			Edited:     m.Revision > 0,
 			Deleted:    m.Deleted,
+			Media:      m.Media,
 			Prio:       m.Rank(),
 		})
 	}
@@ -329,6 +346,11 @@ func MarshalMarkdown(idx Index, recs []Record, loc *time.Location) []byte {
 			}
 			if r.Deleted {
 				line = "~~" + line + "~~"
+			}
+			// O caminho vai literal, sem link Markdown: o agente lê o arquivo
+			// pelo sistema de arquivos, e um [x](y) só atrapalharia o parse.
+			if r.Media != "" {
+				line += " · anexo: `" + r.Media + "`"
 			}
 			fmt.Fprintf(&b, "- `%s` **%s**: %s\n", t.Format("15:04"), sender, line)
 		}

@@ -33,6 +33,18 @@ var allowedClientCalls = map[string]string{
 	"c.wa.Store.Contacts.GetAllContacts": "leitura: nomes de contatos do banco local",
 	"c.wa.Store.ID":                      "leitura: ponteiro do JID próprio; nil significa não pareado",
 	"c.wa.Store.ID.String":               "leitura: JID do próprio aparelho, formatação local",
+
+	// Download é a ÚNICA entrada desta lista que vai buscar conteúdo em vez de
+	// receber o que o WhatsApp empurrou. Por isso é também a única que depende
+	// de o usuário ligar algo: sem [media].enabled e sem uma entrada
+	// [[media.chat]] casando com o chat, nenhuma chamada acontece.
+	//
+	// Continua sendo leitura, e no sentido estrito: busca o blob cifrado no CDN
+	// de mídia e decifra com a chave que já veio dentro da mensagem. Não
+	// notifica o remetente, não marca como lido, não emite recibo, não muda
+	// presença e não altera nada na conta. É o mesmo GET que o WhatsApp Web faz
+	// quando você abre a conversa.
+	"c.wa.Download": "leitura: baixa o anexo que [media] no config autorizou",
 }
 
 // forbiddenMethods são operações do whatsmeow que escrevem na conta: enviam,

@@ -56,9 +56,14 @@ altera grupos, não marca como lido e não mostra "digitando" ou "online".
 
 **Allowlist de chamadas.** `c.wa` é o único `*whatsmeow.Client` do módulo.
 `TestClientCallsAreAllowlisted` percorre a AST de todo o código-fonte e falha se
-qualquer chamada nesse cliente não estiver numa lista explícita — hoje dez
+qualquer chamada nesse cliente não estiver numa lista explícita — hoje treze
 entradas, todas leitura, conexão ou pareamento. Nada alcança a conta sem passar
 por ali.
+
+A única que busca conteúdo em vez de receber o que foi empurrado é `Download`,
+que baixa anexo. Ela depende de você ligar `[media]` no config e listar o chat:
+sem isso não é chamada nenhuma vez. Continua sendo leitura — não notifica o
+remetente, não marca como lido, não emite recibo.
 
 **Denylist de API.** `TestNoWriteAPIAnywhere` falha se `SendMessage`, `MarkRead`,
 `SendChatPresence`, `BuildReaction`, `LeaveGroup` e outras ~40 operações de
@@ -204,8 +209,21 @@ Uma linha de `messages.jsonl`:
 {"id":"3EB0C4","chat":"120363@g.us","chat_name":"Família","group":true,"from_me":false,"sender":"5511999999999@s.whatsapp.net","sender_name":"João","ts":"2026-08-31T12:12:03Z","kind":"text","text":"chego 19h","_prio":111}
 ```
 
-Mídia **nunca é baixada**. Uma foto vira `[imagem] legenda`, um áudio vira
-`[áudio (voz) 34s]`. É o que interessa para um resumo, sem gigabytes na nuvem.
+Por padrão, mídia **não é baixada**: uma foto vira `[imagem] legenda`, um áudio
+vira `[áudio (voz) 34s]`. É o que interessa para um resumo, sem gigabytes na
+nuvem.
+
+Se você ligar `[media]` (ver Configuração), as imagens e os documentos **dos
+chats que você listar** passam a ser baixados e publicados em
+`media/<host_id>/<sha256>.<ext>`, e o registro ganha um ponteiro:
+
+```json
+{"id":"3EB0C5","chat":"120363@g.us","kind":"document","text":"[documento: cardapio.pdf]","media":"media/bruno-win/9f2c….pdf","_prio":311}
+```
+
+No digest a linha vira `[documento: cardapio.pdf] · anexo: \`media/…\``, e o
+agente abre o arquivo direto. Áudio continua fora: transcrever é outro problema.
+Mídia de "ver uma vez" nunca é baixada — o texto continua saindo, o arquivo não.
 
 ### O guia do agente
 
@@ -225,7 +243,7 @@ Além disso ele traz o critério de frescor (comparar `shards[].generated_at` e
 olhar `alertas/`), a
 legenda da notação (`~~apagada~~`, `↩︎ citação`, `[editada]`, `⏎`) e, o mais
 esquecido, o que os arquivos **não** permitem concluir — ausência não é prova, a
-janela é curta e mídia não é baixada.
+janela é curta, e mídia só foi baixada onde você configurou.
 
 ---
 
@@ -238,11 +256,13 @@ sincronização eventualmente consistente. Quatro mecanismos, em camadas:
 `shards/<host_id>.jsonl`. Duas máquinas jamais escrevem no mesmo arquivo. Isso
 elimina a classe inteira de "sobrescrevi com dado antigo" na origem. O alerta de
 sessão caída segue a mesma regra — `alertas/<host_id>.md`, um por máquina: duas
-máquinas caídas ao mesmo tempo apagariam o aviso uma da outra.
+máquinas caídas ao mesmo tempo apagariam o aviso uma da outra. E os anexos, em
+`media/<host_id>/`: é isso que permite cada máquina apagar os próprios arquivos
+que saíram da janela sem alcançar os de ninguém.
 
 **2. Precedência por `prio`, nunca por ordem de chegada.** Cada mensagem carrega
-um `_prio` derivado de: é uma edição? foi apagada? tem corpo? veio ao vivo ou de
-history sync? tem nome do remetente? No banco local o `UPSERT` tem
+um `_prio` derivado de: é uma edição? foi apagada? tem o anexo baixado? tem
+corpo? veio ao vivo ou de history sync? tem nome do remetente? No banco local o `UPSERT` tem
 `WHERE excluded.prio > messages.prio` — um history sync antigo, com corpo vazio,
 literalmente não consegue sobrescrever o que já foi capturado ao vivo. O mesmo
 critério vale no merge entre máquinas, e por ser determinístico todas as máquinas
@@ -283,6 +303,22 @@ Tudo em `config.toml`, sem recompilar. Os campos que você provavelmente vai mex
 | `privacy.redact_phone_numbers` | `false` | Troca telefones no corpo por `[TEL]`. |
 | `privacy.redact_patterns` | `[]` | Regexes extras (CPF, cartão, token) → `[REDACTED]`. |
 | `export.include_status_broadcast` | `false` | Status/stories. Costuma ser ruído. |
+| `media.enabled` | `false` | Trava mestra dos anexos. Desligada, nada é baixado. |
+| `media.max_file_mb` | `20` | Acima disso o anexo é ignorado e fica só o marcador. |
+| `[[media.chat]]` | — | Por chat: `match` (nome ou JID) e `kinds` (`image`, `document`). Chat que não está aqui não baixa nada. |
+
+Baixar anexo muda o que sai da máquina: sem `[media]`, só texto vai para a nuvem.
+Por isso a permissão é por conversa e aditiva — nunca existe uma regra que tire
+permissão, e chat ausente significa "não baixa".
+
+```toml
+[media]
+enabled = true
+
+[[media.chat]]
+match = "Família"
+kinds = ["image", "document"]
+```
 
 Para descobrir nomes exatos de grupos e preencher os filtros:
 
@@ -461,7 +497,13 @@ e o conteúdo não deve ser redistribuído.
 está lá. Se isso importa, veja "Sugestões" abaixo — mas note que criptografar
 também impede o agente de ler, a menos que ele tenha a chave.
 
-**Não é backup.** Mensagens fora da janela são removidas a cada ciclo.
+**Não é backup.** Mensagens fora da janela são removidas a cada ciclo — e os
+anexos publicados junto com elas também.
+
+**Anexo aumenta o que o provedor consegue ler.** Sem `[media]`, o que está na
+nuvem é texto. Com `[media]`, são as fotos e os documentos das conversas que você
+listou. É a mudança de exposição mais significativa do projeto: pense por
+conversa, não por conveniência.
 
 ---
 

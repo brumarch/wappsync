@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -422,9 +423,11 @@ func TestConsolidateAbortsOnIncompatibleSchema(t *testing.T) {
 	}
 	before := h.readIndex(t)
 
-	// Máquina B foi atualizada para um formato futuro.
+	// Máquina B foi atualizada para um formato futuro. A versão é derivada da
+	// atual de propósito: escrita à mão, ela vira a versão corrente no próximo
+	// bump e o teste passa a não testar nada.
 	h.writeShard(t, "maquina-b",
-		export.ShardMeta{Host: "maquina-b", Schema: "wapp-summarizer/2", GeneratedAt: h.now.UTC()},
+		export.ShardMeta{Host: "maquina-b", Schema: export.SchemaVersion + "-futuro", GeneratedAt: h.now.UTC()},
 		[]export.Record{rec("B1", "g@g.us", "de B", ts, 999)})
 
 	res, err := Consolidate(ctx, h.a, h.beA, h.from, h.now.Add(time.Minute))
@@ -444,9 +447,16 @@ func TestConsolidateAbortsOnIncompatibleSchema(t *testing.T) {
 	}
 }
 
-// Shard publicado antes de o campo Schema existir continua sendo aceito:
-// não queremos um flag day que trave a consolidação de todo mundo.
-func TestLegacyShardWithoutSchemaIsAccepted(t *testing.T) {
+// Shard sem o campo Schema é tratado como wapp-summarizer/1, e daí segue a
+// regra normal de compatibilidade.
+//
+// Enquanto o binário publicava /1, isso significava aceitar — era o ponto do
+// campo, evitar um flag day na introdução dele. Com o binário em /2 significa
+// recusar, e recusar é o comportamento certo: aquele shard traz Prio calculado
+// por uma fórmula sem o bit de anexo, então fundir escolheria a versão errada
+// da mensagem sem dar sinal nenhum. O preço é ter que atualizar as máquinas
+// juntas, e é esse o preço que A4 escolheu pagar.
+func TestLegacyShardIsTreatedAsSchemaOne(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t)
 	ts := h.now.Add(-time.Hour)
@@ -459,11 +469,23 @@ func TestLegacyShardWithoutSchemaIsAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Skipped {
-		t.Fatalf("shard legado foi recusado: %s", res.Reason)
+
+	if export.SchemaCompatible("") {
+		// legacySchema == SchemaVersion: o shard entra normalmente.
+		if res.Skipped {
+			t.Fatalf("shard legado foi recusado: %s", res.Reason)
+		}
+		if res.Messages != 1 {
+			t.Errorf("consolidou %d mensagens, queria 1", res.Messages)
+		}
+		return
 	}
-	if res.Messages != 1 {
-		t.Errorf("consolidou %d mensagens, queria 1", res.Messages)
+
+	if !res.Skipped {
+		t.Fatal("shard de formato anterior foi fundido em silêncio")
+	}
+	if !strings.Contains(res.Reason, "maquina-antiga") || !strings.Contains(res.Reason, "atualize") {
+		t.Errorf("o motivo não diz qual máquina atualizar: %q", res.Reason)
 	}
 }
 
@@ -477,5 +499,199 @@ func TestWindowDropsOldMessages(t *testing.T) {
 	got := Window(recs, now.Add(-72*time.Hour))
 	if len(got) != 1 || got[0].ID != "nova" {
 		t.Errorf("janela não aplicada: %+v", got)
+	}
+}
+
+// ---------------------------------------------------------------- anexos ---
+
+// recMedia é um registro que aponta para um anexo publicado.
+func recMedia(id, chat, media string, ts time.Time) export.Record {
+	r := rec(id, chat, "[documento: x.pdf]", ts, 311)
+	r.Kind = "document"
+	r.Media = media
+	return r
+}
+
+// writeLocalMedia simula o que o worker de download deixa no disco.
+func writeLocalMedia(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestPublishMediaUploadsWhatTheShardReferences(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	local := filepath.Join(t.TempDir(), "media")
+	ts := h.now.Add(-time.Hour)
+
+	writeLocalMedia(t, local, "abc.pdf", "conteúdo do pdf")
+	if _, err := PublishShard(ctx, h.a, h.beA,
+		[]export.Record{recMedia("A1", "g@g.us", export.MediaFile("maquina-a", "abc.pdf"), ts)},
+		"", h.from, h.now); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := PublishMedia(ctx, h.a, h.beA, local, h.from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Uploaded != 1 || res.Pruned != 0 || res.Missing != 0 {
+		t.Fatalf("resultado = %+v, queria 1 publicado", res)
+	}
+
+	got, err := h.beA.Get(ctx, export.MediaFile("maquina-a", "abc.pdf"))
+	if err != nil {
+		t.Fatalf("anexo não foi publicado: %v", err)
+	}
+	if string(got) != "conteúdo do pdf" {
+		t.Errorf("conteúdo publicado = %q", got)
+	}
+
+	// Idempotente: rodar de novo não republica nem apaga.
+	again, err := PublishMedia(ctx, h.a, h.beA, local, h.from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Uploaded != 0 || again.Pruned != 0 {
+		t.Errorf("segunda rodada mexeu no destino: %+v", again)
+	}
+}
+
+// Anexo que saiu da janela sai da pasta: sem isso a pasta da nuvem cresce para
+// sempre, que é o motivo de Delete existir na interface.
+func TestPublishMediaPrunesWhatLeftTheWindow(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	local := filepath.Join(t.TempDir(), "media")
+
+	writeLocalMedia(t, local, "velho.pdf", "antigo")
+	if _, err := PublishShard(ctx, h.a, h.beA,
+		[]export.Record{recMedia("A1", "g@g.us", export.MediaFile("maquina-a", "velho.pdf"), h.now.Add(-time.Hour))},
+		"", h.from, h.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PublishMedia(ctx, h.a, h.beA, local, h.from); err != nil {
+		t.Fatal(err)
+	}
+
+	// A janela avança e a mensagem cai fora; o shard é republicado sem ela.
+	from := h.now.Add(time.Hour)
+	if _, err := PublishShard(ctx, h.a, h.beA, nil, "", from, h.now.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := PublishMedia(ctx, h.a, h.beA, local, from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Pruned != 1 {
+		t.Fatalf("resultado = %+v, queria 1 removido", res)
+	}
+	if _, err := h.beA.Get(ctx, export.MediaFile("maquina-a", "velho.pdf")); !errors.Is(err, remote.ErrNotExist) {
+		t.Errorf("anexo fora da janela continua publicado (err = %v)", err)
+	}
+}
+
+// Trava. A poda é a única operação destrutiva do programa. Ela só pode alcançar
+// media/<host_id>/ — um shard alheio referencia anexos que aquela máquina ainda
+// precisa, e apagá-los seria destruir dado de outro em cima de uma decisão
+// tomada com informação incompleta.
+func TestPublishMediaNeverTouchesAnotherHost(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	localA := filepath.Join(t.TempDir(), "a")
+	ts := h.now.Add(-time.Hour)
+
+	// Máquina B publica um anexo e some.
+	localB := filepath.Join(t.TempDir(), "b")
+	writeLocalMedia(t, localB, "deB.pdf", "arquivo da B")
+	if _, err := PublishShard(ctx, h.b, h.beB,
+		[]export.Record{recMedia("B1", "g@g.us", export.MediaFile("maquina-b", "deB.pdf"), ts)},
+		"", h.from, h.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PublishMedia(ctx, h.b, h.beB, localB, h.from); err != nil {
+		t.Fatal(err)
+	}
+
+	// Máquina A publica um shard SEM anexo nenhum e roda a poda.
+	if _, err := PublishShard(ctx, h.a, h.beA,
+		[]export.Record{rec("A1", "g@g.us", "só texto", ts, 111)}, "", h.from, h.now); err != nil {
+		t.Fatal(err)
+	}
+	res, err := PublishMedia(ctx, h.a, h.beA, localA, h.from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Pruned != 0 {
+		t.Errorf("a máquina A apagou %d arquivo(s) que não eram dela", res.Pruned)
+	}
+
+	if _, err := h.beA.Get(ctx, export.MediaFile("maquina-b", "deB.pdf")); err != nil {
+		t.Errorf("o anexo da máquina B sumiu: %v", err)
+	}
+}
+
+// Trava. Record.Media vem de um JSONL que mora na pasta compartilhada — dado de
+// fora. Um caminho com ".." transformaria a poda num Delete no consolidado.
+func TestMediaNameForRejectsEscapes(t *testing.T) {
+	prefix := mediaPrefix("maquina-a")
+
+	if name, ok := mediaNameFor(prefix, prefix+"/abc.jpg"); !ok || name != "abc.jpg" {
+		t.Fatalf("caminho legítimo recusado: %q / %v", name, ok)
+	}
+
+	hostis := []string{
+		prefix + "/../../latest/index.json",
+		prefix + "/../maquina-b/deB.pdf",
+		prefix + "/sub/abc.jpg",
+		prefix + "/..",
+		prefix + "/",
+		prefix,
+		"media/maquina-b/deB.pdf",
+		"latest/index.json",
+		"",
+	}
+	for _, rel := range hostis {
+		if name, ok := mediaNameFor(prefix, rel); ok {
+			t.Errorf("caminho %q foi aceito como o anexo %q", rel, name)
+		}
+	}
+}
+
+// O arquivo recém-baixado ainda não está em shard nenhum: o worker grava e só
+// depois aponta a mensagem para ele. Podar por referência apenas apagaria
+// justamente o que acabou de chegar.
+func TestPublishMediaKeepsRecentLocalFiles(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	local := filepath.Join(t.TempDir(), "media")
+
+	novo := writeLocalMedia(t, local, "recem-baixado.pdf", "acabou de chegar")
+	velho := writeLocalMedia(t, local, "esquecido.pdf", "de outra era")
+	antigo := h.from.Add(-24 * time.Hour)
+	if err := os.Chtimes(velho, antigo, antigo); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := PublishShard(ctx, h.a, h.beA, nil, "", h.from, h.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PublishMedia(ctx, h.a, h.beA, local, h.from); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(novo); err != nil {
+		t.Errorf("arquivo recém-baixado foi apagado antes de ser publicado: %v", err)
+	}
+	if _, err := os.Stat(velho); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("arquivo antigo e sem referência continua no disco (err = %v)", err)
 	}
 }

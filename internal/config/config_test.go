@@ -292,6 +292,168 @@ func TestEmptyFilterEntryMatchesNothing(t *testing.T) {
 	}
 }
 
+func TestMediaAllowed(t *testing.T) {
+	const famJID = "120363000000000000@g.us"
+
+	cases := []struct {
+		name      string
+		media     Media
+		filter    Filter
+		jid, chat string
+		kind      string
+		want      bool
+	}{
+		{
+			name: "chat listado e kind listado",
+			media: Media{Enabled: true, Chats: []MediaChat{
+				{Match: "Família", Kinds: []string{"image", "document"}},
+			}},
+			jid: famJID, chat: "Família", kind: "image", want: true,
+		},
+		{
+			name: "trava mestra desligada barra tudo",
+			media: Media{Enabled: false, Chats: []MediaChat{
+				{Match: "Família", Kinds: []string{"image"}},
+			}},
+			jid: famJID, chat: "Família", kind: "image", want: false,
+		},
+		{
+			name: "chat não listado não baixa",
+			media: Media{Enabled: true, Chats: []MediaChat{
+				{Match: "Família", Kinds: []string{"image"}},
+			}},
+			jid: "x@g.us", chat: "Trabalho", kind: "image", want: false,
+		},
+		{
+			name: "kind não listado no chat não baixa",
+			media: Media{Enabled: true, Chats: []MediaChat{
+				{Match: "Família", Kinds: []string{"document"}},
+			}},
+			jid: famJID, chat: "Família", kind: "image", want: false,
+		},
+		{
+			name: "casa por JID exato",
+			media: Media{Enabled: true, Chats: []MediaChat{
+				{Match: famJID, Kinds: []string{"image"}},
+			}},
+			jid: famJID, chat: "", kind: "image", want: true,
+		},
+		{
+			name: "casa por pedaço do nome, ignorando maiúsculas",
+			media: Media{Enabled: true, Chats: []MediaChat{
+				{Match: "famí", Kinds: []string{"image"}},
+			}},
+			jid: famJID, chat: "Grupo FAMÍLIA SP", kind: "image", want: true,
+		},
+		{
+			// A permissão é aditiva: duas entradas que casam com o mesmo chat
+			// somam kinds. Se a ordem no arquivo importasse, mover um bloco de
+			// lugar mudaria o que sai da máquina — silenciosamente.
+			name: "duas entradas que casam se somam",
+			media: Media{Enabled: true, Chats: []MediaChat{
+				{Match: "Família", Kinds: []string{"image"}},
+				{Match: famJID, Kinds: []string{"document"}},
+			}},
+			jid: famJID, chat: "Família", kind: "document", want: true,
+		},
+		{
+			// Baixar mídia de um chat que o usuário excluiu do export traria
+			// para o disco justamente o que ele mandou não publicar.
+			name: "chat excluído do export nunca baixa",
+			media: Media{Enabled: true, Chats: []MediaChat{
+				{Match: "Família", Kinds: []string{"image"}},
+			}},
+			filter: Filter{Exclude: []string{"Família"}},
+			jid:    famJID, chat: "Família", kind: "image", want: false,
+		},
+		{
+			name: "chat fora do include_only nunca baixa",
+			media: Media{Enabled: true, Chats: []MediaChat{
+				{Match: "Trabalho", Kinds: []string{"image"}},
+			}},
+			filter: Filter{IncludeOnly: []string{"Família"}},
+			jid:    "x@g.us", chat: "Trabalho", kind: "image", want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{Media: tc.media, Filter: tc.filter}
+			if got := cfg.MediaAllowed(tc.jid, tc.chat, tc.kind); got != tc.want {
+				t.Errorf("MediaAllowed(%q, %q, %q) = %v, queria %v",
+					tc.jid, tc.chat, tc.kind, got, tc.want)
+			}
+		})
+	}
+}
+
+// Trava. O padrão de um config que não fala de mídia tem que ser não baixar
+// nada — de nenhum chat, de nenhum tipo. Um default invertido aqui publicaria
+// as fotos de todas as conversas na primeira execução após a atualização, sem
+// ninguém ter pedido.
+func TestMediaDefaultIsDownloadNothing(t *testing.T) {
+	cfg := minimal(t, "")
+
+	if cfg.Media.Enabled {
+		t.Error("[media].enabled deveria vir desligado")
+	}
+	if cfg.Media.MaxFileMB != 20 {
+		t.Errorf("max_file_mb = %d, queria 20", cfg.Media.MaxFileMB)
+	}
+	for _, kind := range MediaKinds() {
+		for _, chat := range []struct{ jid, name string }{
+			{"120363000000000000@g.us", "Família"},
+			{"5511999999999@s.whatsapp.net", "Alguém"},
+			{"x@g.us", ""},
+		} {
+			if cfg.MediaAllowed(chat.jid, chat.name, kind) {
+				t.Errorf("config sem [media] baixaria %q de %q/%q", kind, chat.jid, chat.name)
+			}
+		}
+	}
+}
+
+// Ligar a trava mestra sem listar chat nenhum também não pode baixar nada:
+// enabled é condição necessária, nunca suficiente.
+func TestMediaEnabledWithoutChatsDownloadsNothing(t *testing.T) {
+	cfg := &Config{Media: Media{Enabled: true}}
+	for _, kind := range MediaKinds() {
+		if cfg.MediaAllowed("120363000000000000@g.us", "Família", kind) {
+			t.Errorf("[media].enabled sozinho autorizou baixar %q", kind)
+		}
+	}
+}
+
+// Este arquivo é escrito em pt-BR o tempo todo. kinds = ["imagem"] nunca
+// casaria com nada, e o usuário concluiria que o download está quebrado.
+func TestMediaRejectsUnknownKind(t *testing.T) {
+	_, err := Load(write(t, "host_id = \"m\"\n"+
+		"[media]\nenabled = true\n[[media.chat]]\nmatch = \"Família\"\nkinds = [\"imagem\"]\n"+
+		"[remote]\nbackend = \"none\"\n"))
+	if err == nil {
+		t.Fatal("kind desconhecido foi aceito")
+	}
+	if !strings.Contains(err.Error(), "imagem") || !strings.Contains(err.Error(), "image") {
+		t.Errorf("a mensagem precisa mostrar o valor errado e o certo: %v", err)
+	}
+}
+
+func TestMediaChatValidation(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"match vazio", "[[media.chat]]\nmatch = \"\"\nkinds = [\"image\"]\n", "match vazio"},
+		{"kinds vazio", "[[media.chat]]\nmatch = \"Família\"\nkinds = []\n", "kinds vazio"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(write(t, "host_id = \"m\"\n[media]\nenabled = true\n"+tc.body+
+				"[remote]\nbackend = \"none\"\n"))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("erro = %v, queria conter %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestHasFormat(t *testing.T) {
 	cfg := minimal(t, "[export]\nformats = [\"jsonl\"]\n")
 	if !cfg.HasFormat("jsonl") {

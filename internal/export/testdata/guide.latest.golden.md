@@ -41,9 +41,10 @@ ausência de mensagens no período não é prova de que nada aconteceu.
 
 | No texto | Significa |
 |---|---|
-| `[imagem] legenda` | Imagem não baixada; só a legenda está disponível |
+| `[imagem] legenda` | Imagem; sem `anexo:` na linha, o arquivo não foi baixado |
 | `[áudio (voz) 47s]` | Áudio **não transcrito** — o que foi falado é desconhecido |
-| `[documento: nome.pdf]` | Arquivo não baixado |
+| `[documento: nome.pdf]` | Documento; sem `anexo:` na linha, o arquivo não foi baixado |
+| `· anexo: ../media/<máquina>/<arquivo>` | O arquivo ESTÁ na pasta; abra por esse caminho e leia o conteúdo |
 | `~~texto~~` | Mensagem apagada para todos |
 | `↩︎ "..." · resposta` | Resposta citando outra mensagem |
 | `[editada]` | O texto mostrado é o posterior à edição |
@@ -58,8 +59,12 @@ individuais não repetem o offset.
   inrespondíveis a partir daqui. Diga que não sabe; não estime.
 - **Ausência não é prova.** Uma mensagem pode faltar porque saiu da janela, ou
   porque a máquina que a receberia estava desligada no momento.
-- **Mídia não é baixada.** `[imagem]` não diz o que havia na imagem, e um áudio
-  pode conter a informação mais importante da conversa.
+- **Mídia só é baixada onde foi configurada.** Uma linha sem `anexo:` não diz
+  nada sobre o conteúdo do arquivo — e áudio nunca é transcrito, então pode
+  conter a informação mais importante da conversa.
+- **Anexo citado e ausente é atraso, não exclusão.** Cada máquina publica os
+  próprios arquivos no ritmo dela; um caminho que ainda não existe tende a
+  aparecer no ciclo seguinte.
 - **Pode haver filtro.** A configuração permite excluir conversas inteiras; o
   que não está aqui não necessariamente não aconteceu.
 

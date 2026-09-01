@@ -28,6 +28,11 @@ então o padrão está em uso e o buraco seria real.
 - `enforceReadOnly` fecha o único caminho de envio não solicitado: um *retry
   receipt* pedindo reenvio.
 
+`c.wa.Download` é a única entrada da allowlist que vai *buscar* conteúdo, e é
+gatilhada por config: sem `[media].enabled` e sem um `[[media.chat]]` casando
+com a conversa, nunca é chamada. Continua leitura — não notifica, não marca como
+lido, não emite recibo.
+
 **Se `TestClientCallsAreAllowlisted` falhar, a pergunta certa não é "como faço
 passar".** É: por que apareceu uma chamada nova ao cliente do WhatsApp? Adicionar
 à allowlist é uma decisão consciente de ampliar o que o programa faz na conta —
@@ -38,10 +43,11 @@ nunca um reflexo para calar o teste.
 Várias máquinas escrevem na mesma pasta de nuvem, sem coordenação, sobre uma
 sincronização eventualmente consistente. Quatro mecanismos, em camadas:
 
-1. Cada máquina só escreve arquivos com o próprio nome — `shards/<host_id>.jsonl`
-   e `alertas/<host_id>.md`. Sem arquivo mutável compartilhado, não existe
-   *lost update*. Um `latest/ALERTA.md` comum seria a exceção que reabre a
-   classe inteira; `TestAlertFileIsPerHost` trava isso.
+1. Cada máquina só escreve arquivos com o próprio nome — `shards/<host_id>.jsonl`,
+   `alertas/<host_id>.md` e `media/<host_id>/`. Sem arquivo mutável
+   compartilhado, não existe *lost update*. Um `latest/ALERTA.md` comum seria a
+   exceção que reabre a classe inteira; `TestAlertFileIsPerHost` e
+   `TestMediaPathIsPerHost` travam isso.
 2. Precedência por `prio`, não por ordem de chegada: o UPSERT tem
    `WHERE excluded.prio > messages.prio`.
 3. O shard próprio se funde com a versão já publicada antes de subir.
@@ -50,7 +56,14 @@ sincronização eventualmente consistente. Quatro mecanismos, em camadas:
 
 **Mudar `store.Message.Rank()` exige bumpar `export.SchemaVersion`.** Prioridades
 de fórmulas diferentes continuam sendo números comparáveis — nada quebra, o merge
-só passa a escolher a versão errada da mensagem, em silêncio.
+só passa a escolher a versão errada da mensagem, em silêncio. Quem cobra isso é
+`TestRankFormulaIsPinnedToSchemaVersion`, que fixa a tabela de prioridades e a
+versão de schema no mesmo lugar.
+
+`remote.Backend.Delete` é a **única operação destrutiva** do programa. Só é
+chamada na poda de `media/<host_id>/`, só alcança arquivo da própria máquina, e
+recusa caminho com `..` em duas camadas (`mediaNameFor` e `safeRelPath`) porque
+o caminho vem de um JSONL que mora na pasta compartilhada.
 
 ## Comandos
 

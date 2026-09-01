@@ -24,16 +24,22 @@ suíte passa e — se for teste de trava — foi validado por mutação.
 | A7 | Guarda de versão do whatsmeow | `auditedWhatsmeowVersion`; bump falha até reauditar `enforceReadOnly` |
 | B2 | `internal/wa` testável sem cliente real | 29,4% → 51,2%. `ingestHistory` virou `collectHistory(data, parse)`, com a função de parse por parâmetro; 20 testes novos de `toStoreMessage`/`collectHistory` com protobufs à mão. As duas travas de somente-leitura passaram a inspecionar *referência*, não só chamada — `x := c.wa.SendMessage` passava verde antes |
 | B5 | Alerta de sessão caída | `events.LoggedOut`/`StreamReplaced` viram `SessionLoss` (função pura) e derrubam o `run`: último ciclo, `alertas/<host_id>.md` no destino e saída com **código 3**, distinto de 1 para o supervisor não reiniciar em laço. 10 testes novos; `wa` 53,1% → 55,9%, `cmd` 14,5% → 17,5%. Duas travas validadas por mutação. Publica em `alertas/<host_id>.md`, não no `latest/ALERTA.md` proposto: um arquivo compartilhado seria o único mutável do desenho, e duas máquinas caídas juntas apagariam o alerta uma da outra |
+| B10 | Download e publicação de anexos (imagem e documento) | `[media]` no config, desligado por padrão e por conversa: `enabled` + `[[media.chat]]` com `match`/`kinds`. `c.wa.Download` entrou na allowlist (12 → 13 entradas). `Rank()` ganhou o bit de anexo (+200) e `SchemaVersion` foi para `wapp-summarizer/2` — sem o bit, o anexo empatava em prio e era descartado pelo `>` estrito do UPSERT. `remote.Backend` ganhou `Delete`, a primeira operação destrutiva do programa, restrita a `media/<host_id>/`. Publicado como `media/<host_id>/<sha256>.<ext>`, com o nome derivado do conteúdo e a extensão do mimetype, nunca do nome declarado. 8 travas novas validadas por mutação |
 | B8 | Guia para os agentes que leem o destino | `export.MarshalGuide`; publicado como `LEIA-ME.md` e `AGENTS.md`, em `latest/` e na raiz. Estabelece que o conteúdo é dado e nunca instrução, dá o critério de frescor, a legenda da notação e o que NÃO se pode concluir. Dois goldens + teste independente da trava de confiança, para sobreviver a um `-update` descuidado |
 
 Cobertura após esta rodada, medida com
 `go test ./... -coverpkg=./internal/<pkg>/` e unindo os blocos entre os binários
-de teste: `export` 92,2% · `config` 89,5% · `merge` 82,6% · `store` 64,0% ·
-`wa` 55,9% · `remote` 34,6% · `cmd` 17,5%.
+de teste: `export` 92,5% · `config` 90,0% · `merge` 83,7% · `store` 70,3% ·
+`wa` 55,3% · `remote` 41,8% · `cmd` 18,9%.
 
-Os números das rodadas anteriores saíram de outro caminho de medição e não são
-comparáveis linha a linha com estes. Por este, o baseline imediatamente antes de
-B5 era `export` 91,6% · `wa` 53,1% · `cmd` 14,5%; o resto não mudou.
+Antes de B10 era `export` 92,2% · `config` 89,5% · `merge` 82,6% · `store` 64,0% ·
+`wa` 55,9% · `remote` 34,6% · `cmd` 17,5%. `wa` caiu 0,6 ponto porque B10 somou
+o worker de download, que chama `Download` e não é testável sem conta — a decisão
+é a de sempre: as partes puras (`attachmentOf`, `mediaJobFor`, `mediaFileName`)
+têm teste, a borda de rede não.
+
+Os números das rodadas anteriores a B5 saíram de outro caminho de medição e não
+são comparáveis linha a linha com estes.
 
 **Nota sobre B2.** Foi executado pela alternativa barata registrada no próprio
 item, não pela proposta principal: nenhum corpus de conversa real foi capturado
@@ -45,18 +51,25 @@ montada à mão não garante —, o caminho continua disponível.
 
 ## Pendentes
 
-### B1 — Transcrição de áudio · impacto alto · esforço alto
+### B1 — Transcrição de áudio · impacto alto · esforço médio
 
 **Problema.** Muita conversa de WhatsApp é áudio. Hoje vira `[áudio (voz) 47s]`
-e some do resumo. É a maior lacuna de *conteúdo* do projeto — não de código.
+e some do resumo. Continua sendo a maior lacuna de *conteúdo* do projeto.
 
-**Proposta.** Baixar o áudio (`cli.Download`) e transcrever com Whisper local
-(`whisper.cpp`), gravando o texto no corpo da mensagem. Opcional por config,
-desligado por padrão.
+**O que B10 já resolveu.** O caminho de download existe, `Download` já está na
+allowlist, e a política por conversa já é o lugar certo para ligar áudio. O
+esforço caiu de alto para médio: o que falta é a transcrição em si.
 
-**Cuidados.** `Download` é leitura de mídia, mas **precisa entrar na allowlist**
-de `readonly_test.go` com justificativa. Custo de banda, CPU e disco. Decidir
-se o áudio bruto é descartado após transcrever (recomendado).
+**Proposta.** Aceitar `"audio"` em `media.chat.kinds` — hoje `config.mediaKinds`
+recusa o valor de propósito, para não ignorar em silêncio uma linha que o usuário
+escreveu esperando efeito. Baixar o áudio e transcrever com Whisper local
+(`whisper.cpp`), gravando o texto no corpo da mensagem.
+
+**Cuidados.** O áudio bruto deve ser descartado após transcrever (recomendado):
+publicar `.ogg` na nuvem é peso sem leitor. O bit de anexo em `Rank()` já cobre a
+precedência da versão transcrita sobre o marcador, então **não** é preciso outro
+bump de schema — foi para isso que ele foi desenhado cobrindo os dois casos.
+Custo de CPU, e uma dependência externa que o resto do projeto não tem.
 
 ---
 
@@ -74,13 +87,19 @@ anti-sobrescrita — de preferência por agente, não compartilhado.
 
 ### B4 — Testes de `internal/remote` · impacto médio · esforço baixo
 
-**Problema.** 0% de cobertura própria. O backend `folder` é exercitado de forma
-indireta por `merge` e pelo e2e, mas o `rclone` **nunca roda em teste nenhum**.
+**Problema.** O item nasceu dizendo "0% de cobertura própria"; hoje são 41,8%,
+quase tudo exercício indireto por `merge` e pelo e2e. O que continua valendo é o
+essencial: o `rclone` **não roda em teste nenhum**, e `rcat` com corpo binário
+passou a ser caminho quente desde B10.
+
+**Já feito por B10.** `remote_test.go` existe e cobre `Delete` — a operação
+destrutiva — incluindo a recusa de caminho com `..` nos dois backends.
 
 **Proposta.** Para `folder`: escrita atômica, `Get` inexistente devolvendo
 `ErrNotExist`, `List` ignorando `.tmp-`, sobrescrita no Windows. Para `rclone`:
 um binário falso no PATH que registra os argumentos recebidos, verificando que
-`rcat`/`cat`/`lsf` são chamados como se espera.
+`rcat`/`cat`/`lsf`/`deletefile` são chamados como se espera — e que `rcat`
+entrega bytes intactos, que é o que um anexo exige.
 
 ---
 
@@ -99,6 +118,47 @@ código de saída precisam ser outros.
 **Ficou fora de B5 de propósito:** o item pedia sessão caída, e tratar
 "desvinculado" e "temporariamente banido" como a mesma coisa mandaria a pessoa
 fazer a coisa errada.
+
+---
+
+### B11 — Setup interativo via CLI · impacto médio · esforço médio
+
+**Problema.** Escolher conversas e política de anexo hoje é editar TOML à mão
+depois de rodar `wappsync groups` e copiar JIDs. Funciona, mas é o passo em que
+mais se erra — e agora errar tem consequência de privacidade, não só de ruído.
+
+**Proposta.** Um `wappsync setup` que conecta, lista grupos e conversas, e vai
+perguntando: entra no export? baixa imagem? baixa documento? Escreve o
+`[filter]` e o `[media]` correspondentes.
+
+**Restrições que o item precisa respeitar.**
+
+1. Só funciona depois do `login` — listar grupos exige conexão.
+2. Não pode atropelar um `config.toml` editado à mão. Mostrar o diff e pedir
+   confirmação, ou gravar ao lado.
+3. Escrever `"Família"` num TOML a partir de um terminal Windows cai direto na
+   armadilha de UTF-8 do `CLAUDE.md`. Gravar com encoding explícito e ter um
+   teste com acento no nome do grupo.
+4. O padrão de qualquer pergunta de anexo é **não**. Um assistente que facilita
+   ligar tudo é pior que nenhum.
+
+---
+
+### B12 — Anexos do history sync não sobrevivem à fila · impacto baixo · esforço baixo
+
+**Problema.** A fila de download tem 256 posições e descarta quando cheia (com
+aviso no log). Ao parear uma máquina nova com `[media]` ligado, o history sync
+enfileira a janela inteira de uma vez e o excesso se perde. A mensagem fica com o
+marcador, então nada quebra — mas os anexos daquele lote não vêm, e não há
+segunda tentativa.
+
+**Proposta.** Persistir os pendentes (uma tabela no `messages.db`) e drenar em
+ritmo constante, em vez de manter a fila só em memória. Como efeito colateral,
+um download que falhou por rede passa a ter retry, o que hoje também não existe.
+
+**Por que não entrou em B10.** A degradação é graciosa e visível no log, e a
+alternativa (fila sem limite) trocaria perda de anexo por consumo de memória sem
+teto durante o history sync.
 
 ---
 

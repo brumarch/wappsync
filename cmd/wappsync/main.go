@@ -531,6 +531,15 @@ func cycle(ctx context.Context, cfg *config.Config, db *store.DB, deviceJID stri
 	fmt.Printf("[%s] shard %q publicado: %d mensagens em %d conversas\n",
 		now.Format("15:04"), cfg.HostID, meta.Messages, len(idx.Chats))
 
+	// Anexo é acessório: se a sincronização deles falhar, as mensagens já
+	// foram publicadas e a consolidação não tem por que parar.
+	if med, err := merge.PublishMedia(ctx, cfg, be, cfg.MediaDir(), from); err != nil {
+		fmt.Fprintf(os.Stderr, "aviso: anexos: %v\n", err)
+	} else if med.Uploaded > 0 || med.Pruned > 0 || med.Missing > 0 {
+		fmt.Printf("[%s] anexos: %d publicados, %d removidos da janela, %d sem arquivo local\n",
+			now.Format("15:04"), med.Uploaded, med.Pruned, med.Missing)
+	}
+
 	if !cfg.Merge.Enabled {
 		return nil
 	}

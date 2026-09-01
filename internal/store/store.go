@@ -30,6 +30,12 @@ type Message struct {
 	Revision   int
 	Deleted    bool
 	Source     string // "live" | "history"
+
+	// Media é o caminho relativo do anexo publicado, ex.
+	// "media/bruno-win/ab12....jpg". Guarda o caminho COMPLETO, com o host,
+	// e não só o nome do arquivo, porque o registro viaja para outras
+	// máquinas no merge e precisa continuar apontando para o lugar certo.
+	Media string
 }
 
 // Rank define a precedência de uma versão da mensagem. Maior vence.
@@ -43,6 +49,14 @@ func (m Message) Rank() int {
 	r := m.Revision * 1000
 	if m.Deleted {
 		r += 500
+	}
+	// O anexo baixado é conteúdo que o marcador não tem, então pesa acima de
+	// "tem corpo": entre duas versões da mesma mensagem, a que traz o arquivo
+	// ganha. Sem este bit as duas empatam, e como o UPSERT é `>` estrito, o
+	// download nunca entraria no banco — nem venceria o merge, onde o
+	// desempate cairia no nome do remetente, que é arbitrário.
+	if m.Media != "" {
+		r += 200
 	}
 	if m.Body != "" {
 		r += 100
@@ -90,6 +104,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	revision    INTEGER NOT NULL DEFAULT 0,
 	deleted     INTEGER NOT NULL DEFAULT 0,
 	source      TEXT    NOT NULL DEFAULT 'live',
+	media       TEXT    NOT NULL DEFAULT '',
 	prio        INTEGER NOT NULL DEFAULT 0,
 	seen_at     INTEGER NOT NULL,
 	PRIMARY KEY (chat_jid, id)
@@ -113,8 +128,8 @@ CREATE TABLE IF NOT EXISTS meta (
 const upsertMessage = `
 INSERT INTO messages
 	(chat_jid, id, sender_jid, sender_name, is_from_me, is_group, ts, kind, body,
-	 quoted_id, quoted_text, revision, deleted, source, prio, seen_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	 quoted_id, quoted_text, revision, deleted, source, media, prio, seen_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT (chat_jid, id) DO UPDATE SET
 	sender_jid  = excluded.sender_jid,
 	sender_name = excluded.sender_name,
@@ -128,6 +143,7 @@ ON CONFLICT (chat_jid, id) DO UPDATE SET
 	revision    = excluded.revision,
 	deleted     = excluded.deleted,
 	source      = excluded.source,
+	media       = excluded.media,
 	prio        = excluded.prio,
 	seen_at     = excluded.seen_at
 WHERE excluded.prio > messages.prio
@@ -146,7 +162,52 @@ func Open(path string) (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("criando schema: %w", err)
 	}
+	if err := migrate(sqlDB); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("migrando %s: %w", path, err)
+	}
 	return &DB{sql: sqlDB}, nil
+}
+
+// migrate adiciona colunas que versões anteriores não tinham.
+//
+// `CREATE TABLE IF NOT EXISTS` não mexe numa tabela que já existe, então um
+// banco criado por um binário antigo continuaria sem as colunas novas e todo
+// INSERT passaria a falhar depois da atualização. A checagem é por
+// PRAGMA table_info e não por texto de erro: mensagem de driver muda.
+func migrate(db *sql.DB) error {
+	columns := map[string]string{
+		"media": `ALTER TABLE messages ADD COLUMN media TEXT NOT NULL DEFAULT ''`,
+	}
+
+	rows, err := db.Query(`PRAGMA table_info(messages)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid         int
+			name, ctype string
+			notNull, pk int
+			dflt        sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		delete(columns, name)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+
+	for _, stmt := range columns {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (d *DB) Close() error { return d.sql.Close() }
@@ -180,7 +241,7 @@ func (d *DB) PutMessages(ctx context.Context, msgs []Message) (int, error) {
 		res, err := stmt.ExecContext(ctx,
 			m.ChatJID, m.ID, m.SenderJID, m.SenderName, m.IsFromMe, m.IsGroup,
 			m.Timestamp.Unix(), m.Kind, m.Body, m.QuotedID, m.QuotedText,
-			m.Revision, m.Deleted, m.Source, m.Rank(), now)
+			m.Revision, m.Deleted, m.Source, m.Media, m.Rank(), now)
 		if err != nil {
 			return written, fmt.Errorf("gravando %s/%s: %w", m.ChatJID, m.ID, err)
 		}
@@ -235,14 +296,27 @@ func (d *DB) Chats(ctx context.Context) (map[string]Chat, error) {
 	return out, rows.Err()
 }
 
+// messageColumns é a lista de colunas lida por Since e por message. Uma só,
+// para que as duas não divirjam quando uma coluna nova aparecer.
+const messageColumns = `chat_jid, id, sender_jid, sender_name, is_from_me, is_group, ts,
+	kind, body, quoted_id, quoted_text, revision, deleted, source, media`
+
+// scanMessage lê uma linha na ordem de messageColumns.
+func scanMessage(sc interface{ Scan(...any) error }) (Message, error) {
+	var m Message
+	var ts int64
+	err := sc.Scan(&m.ChatJID, &m.ID, &m.SenderJID, &m.SenderName,
+		&m.IsFromMe, &m.IsGroup, &ts, &m.Kind, &m.Body,
+		&m.QuotedID, &m.QuotedText, &m.Revision, &m.Deleted, &m.Source, &m.Media)
+	m.Timestamp = time.Unix(ts, 0)
+	return m, err
+}
+
 // Since devolve todas as mensagens a partir de cutoff, ordenadas cronologicamente.
 func (d *DB) Since(ctx context.Context, cutoff time.Time) ([]Message, error) {
-	rows, err := d.sql.QueryContext(ctx, `
-		SELECT chat_jid, id, sender_jid, sender_name, is_from_me, is_group, ts,
-		       kind, body, quoted_id, quoted_text, revision, deleted, source
-		FROM messages
-		WHERE ts >= ?
-		ORDER BY ts ASC, id ASC`, cutoff.Unix())
+	rows, err := d.sql.QueryContext(ctx,
+		`SELECT `+messageColumns+` FROM messages WHERE ts >= ? ORDER BY ts ASC, id ASC`,
+		cutoff.Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -250,15 +324,62 @@ func (d *DB) Since(ctx context.Context, cutoff time.Time) ([]Message, error) {
 
 	var out []Message
 	for rows.Next() {
-		var m Message
-		var ts int64
-		if err := rows.Scan(&m.ChatJID, &m.ID, &m.SenderJID, &m.SenderName,
-			&m.IsFromMe, &m.IsGroup, &ts, &m.Kind, &m.Body,
-			&m.QuotedID, &m.QuotedText, &m.Revision, &m.Deleted, &m.Source); err != nil {
+		m, err := scanMessage(rows)
+		if err != nil {
 			return nil, err
 		}
-		m.Timestamp = time.Unix(ts, 0)
 		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// message lê uma mensagem pela chave. ok = false quando ela não existe.
+func (d *DB) message(ctx context.Context, chatJID, id string) (Message, bool, error) {
+	row := d.sql.QueryRowContext(ctx,
+		`SELECT `+messageColumns+` FROM messages WHERE chat_jid = ? AND id = ?`, chatJID, id)
+	m, err := scanMessage(row)
+	if err == sql.ErrNoRows {
+		return Message{}, false, nil
+	}
+	return m, err == nil, err
+}
+
+// SetMedia associa a uma mensagem já gravada o anexo que acabou de ser baixado.
+//
+// Passa pelo MESMO upsert das outras escritas, de propósito. O anexo só entra
+// se elevar o prio — que é exatamente o que o bit de mídia em Rank() garante.
+// Um UPDATE direto contornaria a regra de precedência, e a regra é o
+// invariante: é ela que impede uma versão pior de sobrescrever uma melhor.
+func (d *DB) SetMedia(ctx context.Context, chatJID, id, media string) (bool, error) {
+	m, ok, err := d.message(ctx, chatJID, id)
+	if err != nil || !ok {
+		return false, err
+	}
+	if m.Media == media {
+		return false, nil
+	}
+	m.Media = media
+	return d.PutMessage(ctx, m)
+}
+
+// MediaPaths devolve os caminhos de anexo referenciados por mensagens dentro da
+// janela. É o que decide o que precisa estar publicado — e, por complemento, o
+// que já pode ser podado.
+func (d *DB) MediaPaths(ctx context.Context, cutoff time.Time) (map[string]bool, error) {
+	rows, err := d.sql.QueryContext(ctx,
+		`SELECT DISTINCT media FROM messages WHERE ts >= ? AND media <> ''`, cutoff.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]bool{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out[p] = true
 	}
 	return out, rows.Err()
 }

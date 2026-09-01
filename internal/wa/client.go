@@ -41,6 +41,11 @@ type Client struct {
 	// lost recebe o primeiro motivo pelo qual a captura parou. Bufferizado em
 	// 1: quem sinaliza são as goroutines do whatsmeow, que não podem bloquear.
 	lost chan SessionLoss
+
+	// Fila de anexos. nil quando [media].enabled está desligado — e é o nil
+	// que faz enqueueMedia virar no-op, sem espalhar o if pelo código.
+	mediaQ    chan mediaJob
+	mediaDone chan struct{}
 }
 
 // New abre a sessão local e monta o cliente do WhatsApp (sem conectar ainda).
@@ -82,6 +87,7 @@ func New(ctx context.Context, cfg *config.Config, db *msgstore.DB, verbose bool)
 		lost:      make(chan SessionLoss, 1),
 	}
 	enforceReadOnly(c.wa)
+	c.startMediaWorker()
 	c.wa.AddEventHandler(c.handleEvent)
 	return c, nil
 }
@@ -115,6 +121,9 @@ func enforceReadOnly(cli *whatsmeow.Client) {
 }
 
 func (c *Client) Close() {
+	// Antes do Disconnect: o worker pode estar baixando, e ele escreve no
+	// banco que o chamador fecha logo em seguida.
+	c.stopMediaWorker()
 	if c.wa != nil {
 		c.wa.Disconnect()
 	}
@@ -283,6 +292,12 @@ func (c *Client) ingest(ctx context.Context, evt *events.Message, source string)
 		c.log.Warnf("gravando mensagem %s: %v", m.ID, err)
 		return
 	}
+	// Depois de gravar, nunca antes: o download termina num SetMedia, que não
+	// acha linha nenhuma se a mensagem ainda não existe — e o arquivo baixado
+	// viraria órfão na pasta.
+	if job, ok := c.mediaJobFor(m, evt.Message); ok {
+		c.queueMediaJob(job)
+	}
 	_ = c.db.UpsertChat(ctx, msgstore.Chat{
 		JID:     m.ChatJID,
 		Name:    c.getName(m.ChatJID),
@@ -360,7 +375,7 @@ func (c *Client) ingestHistory(ctx context.Context, evt *events.HistorySync) {
 	if data == nil {
 		return
 	}
-	batch, chats := c.collectHistory(data, c.wa.ParseWebMessage)
+	batch, chats, pending := c.collectHistory(data, c.wa.ParseWebMessage)
 
 	for _, ch := range chats {
 		_ = c.db.UpsertChat(ctx, ch)
@@ -371,6 +386,10 @@ func (c *Client) ingestHistory(ctx context.Context, evt *events.HistorySync) {
 		c.log.Warnf("history sync (%s): %v", syncType, err)
 		return
 	}
+	// Mesma ordem do caminho ao vivo: as linhas primeiro, os anexos depois.
+	for _, job := range pending {
+		c.queueMediaJob(job)
+	}
 	if len(batch) > 0 {
 		c.log.Infof("history sync %s: %d mensagens recebidas, %d novas/atualizadas", syncType, len(batch), written)
 	}
@@ -379,8 +398,11 @@ func (c *Client) ingestHistory(ctx context.Context, evt *events.HistorySync) {
 // collectHistory percorre o history sync e devolve o que gravar, sem tocar no
 // banco nem na rede. Os filtros são os mesmos do caminho ao vivo, porque quem
 // decide o que entra continua sendo toStoreMessage.
-func (c *Client) collectHistory(data *waHistorySync.HistorySync, parse parseWebFunc) ([]msgstore.Message, map[string]msgstore.Chat) {
-	var batch []msgstore.Message
+func (c *Client) collectHistory(data *waHistorySync.HistorySync, parse parseWebFunc) ([]msgstore.Message, map[string]msgstore.Chat, []mediaJob) {
+	var (
+		batch   []msgstore.Message
+		pending []mediaJob
+	)
 	chats := map[string]msgstore.Chat{}
 
 	for _, conv := range data.GetConversations() {
@@ -410,6 +432,9 @@ func (c *Client) collectHistory(data *waHistorySync.HistorySync, parse parseWebF
 				continue
 			}
 			batch = append(batch, m)
+			if job, ok := c.mediaJobFor(m, parsed.Message); ok {
+				pending = append(pending, job)
+			}
 			if m.Timestamp.After(lastTS) {
 				lastTS = m.Timestamp
 			}
@@ -430,7 +455,7 @@ func (c *Client) collectHistory(data *waHistorySync.HistorySync, parse parseWebF
 			c.setName(pn.GetID(), pn.GetPushname())
 		}
 	}
-	return batch, chats
+	return batch, chats, pending
 }
 
 // wantChat aplica os filtros estruturais (status, newsletters, bots).

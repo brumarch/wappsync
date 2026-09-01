@@ -14,6 +14,8 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 
+	waLog "go.mau.fi/whatsmeow/util/log"
+
 	"github.com/bmar13/wapp-summarizer/internal/config"
 	msgstore "github.com/bmar13/wapp-summarizer/internal/store"
 )
@@ -32,7 +34,7 @@ func testClient(tweak func(*config.Config)) *Client {
 	if tweak != nil {
 		tweak(cfg)
 	}
-	return &Client{cfg: cfg, names: map[string]string{}}
+	return &Client{cfg: cfg, names: map[string]string{}, log: waLog.Noop}
 }
 
 func user(n string) types.JID  { return types.NewJID(n, types.DefaultUserServer) }
@@ -338,7 +340,7 @@ func TestCollectHistory(t *testing.T) {
 		}},
 	}
 
-	batch, chats := c.collectHistory(data, fakeParseWeb)
+	batch, chats, _ := c.collectHistory(data, fakeParseWeb)
 
 	if len(batch) != 2 {
 		t.Fatalf("batch tem %d mensagens, queria 2", len(batch))
@@ -389,7 +391,7 @@ func TestCollectHistoryLastTSIsMaxNotLast(t *testing.T) {
 		}},
 	}
 
-	_, chats := c.collectHistory(data, fakeParseWeb)
+	_, chats, _ := c.collectHistory(data, fakeParseWeb)
 	if got := chats["123-456@g.us"].LastTS; !got.Equal(novo) {
 		t.Errorf("LastTS = %v, queria %v", got, novo)
 	}
@@ -409,7 +411,7 @@ func TestCollectHistorySkipsUnparseableConversationID(t *testing.T) {
 		},
 	}
 
-	batch, chats := c.collectHistory(data, fakeParseWeb)
+	batch, chats, _ := c.collectHistory(data, fakeParseWeb)
 	if len(batch) != 1 || batch[0].ID != "M2" {
 		t.Errorf("batch = %+v, queria só M2", batch)
 	}
@@ -431,7 +433,7 @@ func TestCollectHistorySkipsParseFailure(t *testing.T) {
 		}},
 	}
 
-	batch, _ := c.collectHistory(data, fakeParseWeb)
+	batch, _, _ := c.collectHistory(data, fakeParseWeb)
 	if len(batch) != 1 || batch[0].ID != "M2" {
 		t.Errorf("batch = %+v, queria só M2", batch)
 	}
@@ -449,7 +451,7 @@ func TestCollectHistoryAppliesChatFilter(t *testing.T) {
 		},
 	}
 
-	batch, chats := c.collectHistory(data, fakeParseWeb)
+	batch, chats, _ := c.collectHistory(data, fakeParseWeb)
 	if len(batch) != 1 || batch[0].ID != "G1" {
 		t.Errorf("batch = %+v, queria só o grupo", batch)
 	}
@@ -472,7 +474,7 @@ func TestCollectHistoryRespectsRetention(t *testing.T) {
 		}},
 	}
 
-	batch, _ := c.collectHistory(data, fakeParseWeb)
+	batch, _, _ := c.collectHistory(data, fakeParseWeb)
 	if len(batch) != 1 || batch[0].ID != "NOVA" {
 		t.Errorf("batch = %+v, queria só NOVA", batch)
 	}
@@ -490,7 +492,7 @@ func TestCollectHistoryFallsBackToDisplayName(t *testing.T) {
 		}},
 	}
 
-	_, chats := c.collectHistory(data, fakeParseWeb)
+	_, chats, _ := c.collectHistory(data, fakeParseWeb)
 	if got := chats["5511999990000@s.whatsapp.net"].Name; got != "Zé da Padaria" {
 		t.Errorf("Name = %q, queria o DisplayName", got)
 	}
