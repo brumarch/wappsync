@@ -96,6 +96,14 @@ func TestDigestGolden(t *testing.T) {
 			SenderName: "Ana", IsGroup: true, Timestamp: at(0, 11, 20),
 			Kind: "audio", Body: "[áudio (voz) 47s]", Source: "live",
 		},
+		// Áudio transcrito: o marcador de duração continua, a fala entra entre
+		// aspas, e o texto completo fica no .txt apontado por Media.
+		{
+			ID: "T4", ChatJID: "120363000000000002@g.us", SenderJID: "5511900000004@s.whatsapp.net",
+			SenderName: "Ana", IsGroup: true, Timestamp: at(0, 11, 22),
+			Kind: "audio", Body: `[áudio (voz) 12s] "consigo revisar hoje à tarde, mas o deploy fica pra amanhã"`,
+			Source: "live", Media: "media/bruno-win/4d81b7c3.txt",
+		},
 		// Conversa individual, com quebra de linha no corpo.
 		{
 			ID: "D1", ChatJID: "5511900000001@s.whatsapp.net", SenderJID: "5511900000001@s.whatsapp.net",
@@ -112,7 +120,7 @@ func TestDigestGolden(t *testing.T) {
 	recs := Build(cfg, msgs, chats, from)
 	idx := BuildIndex(cfg, recs, from, now, cfg.HostID)
 	idx.Shards = []ShardMeta{
-		{Host: "bruno-win", Schema: SchemaVersion, Messages: 10, GeneratedAt: now},
+		{Host: "bruno-win", Schema: SchemaVersion, Messages: 11, GeneratedAt: now},
 		{Host: "bruno-mac", Schema: SchemaVersion, Messages: 7, GeneratedAt: now.Add(-5 * time.Minute)},
 	}
 

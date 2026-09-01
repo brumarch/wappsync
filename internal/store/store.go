@@ -333,8 +333,8 @@ func (d *DB) Since(ctx context.Context, cutoff time.Time) ([]Message, error) {
 	return out, rows.Err()
 }
 
-// message lê uma mensagem pela chave. ok = false quando ela não existe.
-func (d *DB) message(ctx context.Context, chatJID, id string) (Message, bool, error) {
+// Message lê uma mensagem pela chave. ok = false quando ela não existe.
+func (d *DB) Message(ctx context.Context, chatJID, id string) (Message, bool, error) {
 	row := d.sql.QueryRowContext(ctx,
 		`SELECT `+messageColumns+` FROM messages WHERE chat_jid = ? AND id = ?`, chatJID, id)
 	m, err := scanMessage(row)
@@ -351,7 +351,7 @@ func (d *DB) message(ctx context.Context, chatJID, id string) (Message, bool, er
 // Um UPDATE direto contornaria a regra de precedência, e a regra é o
 // invariante: é ela que impede uma versão pior de sobrescrever uma melhor.
 func (d *DB) SetMedia(ctx context.Context, chatJID, id, media string) (bool, error) {
-	m, ok, err := d.message(ctx, chatJID, id)
+	m, ok, err := d.Message(ctx, chatJID, id)
 	if err != nil || !ok {
 		return false, err
 	}
@@ -359,6 +359,25 @@ func (d *DB) SetMedia(ctx context.Context, chatJID, id, media string) (bool, err
 		return false, nil
 	}
 	m.Media = media
+	return d.PutMessage(ctx, m)
+}
+
+// SetTranscription grava o corpo enriquecido pela transcrição e o arquivo do
+// texto completo, de uma vez.
+//
+// Os dois juntos, e não em duas escritas: o corpo sozinho não muda o prio — o
+// bit de Rank olha para Media — e a escrita seria recusada pelo UPSERT, que é
+// `>` estrito. A transcrição só entra no banco porque vem acompanhada do
+// ponteiro para o arquivo.
+func (d *DB) SetTranscription(ctx context.Context, chatJID, id, body, media string) (bool, error) {
+	m, ok, err := d.Message(ctx, chatJID, id)
+	if err != nil || !ok {
+		return false, err
+	}
+	if m.Media == media && m.Body == body {
+		return false, nil
+	}
+	m.Body, m.Media = body, media
 	return d.PutMessage(ctx, m)
 }
 

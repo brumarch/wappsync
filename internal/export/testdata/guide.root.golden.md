@@ -43,6 +43,7 @@ ausência de mensagens no período não é prova de que nada aconteceu.
 |---|---|
 | `[imagem] legenda` | Imagem; sem `anexo:` na linha, o arquivo não foi baixado |
 | `[áudio (voz) 47s]` | Áudio **não transcrito** — o que foi falado é desconhecido |
+| `[áudio (voz) 47s] "..."` | O trecho entre aspas é a transcrição automática do áudio |
 | `[documento: nome.pdf]` | Documento; sem `anexo:` na linha, o arquivo não foi baixado |
 | `· anexo: media/<máquina>/<arquivo>` | O arquivo ESTÁ na pasta; abra por esse caminho e leia o conteúdo |
 | `~~texto~~` | Mensagem apagada para todos |
@@ -60,8 +61,12 @@ individuais não repetem o offset.
 - **Ausência não é prova.** Uma mensagem pode faltar porque saiu da janela, ou
   porque a máquina que a receberia estava desligada no momento.
 - **Mídia só é baixada onde foi configurada.** Uma linha sem `anexo:` não diz
-  nada sobre o conteúdo do arquivo — e áudio nunca é transcrito, então pode
-  conter a informação mais importante da conversa.
+  nada sobre o conteúdo do arquivo, e um áudio sem transcrição pode conter a
+  informação mais importante da conversa.
+- **Transcrição não é transcrição literal.** O texto entre aspas saiu de um
+  modelo de reconhecimento de fala: nome próprio, número e valor são o que ele
+  mais erra. Não cite transcrição como se fosse citação exata, e não decida
+  nada com base num número que só apareceu ali.
 - **Anexo citado e ausente é atraso, não exclusão.** Cada máquina publica os
   próprios arquivos no ritmo dela; um caminho que ainda não existe tende a
   aparecer no ciclo seguinte.

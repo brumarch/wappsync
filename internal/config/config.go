@@ -57,6 +57,29 @@ type Media struct {
 	Chats     []MediaChat `toml:"chat"`
 }
 
+// Transcribe configura a transcrição local de áudio.
+//
+// Duas dependências externas que o resto do projeto não tem: um binário de
+// Whisper e o ffmpeg. Ficam como caminho no config, e não embutidas, porque
+// nenhuma das duas é Go — e cravá-las traria compilador C de volta, que é
+// exatamente o que o driver SQLite puro Go existe para evitar.
+type Transcribe struct {
+	Enabled bool   `toml:"enabled"`
+	Binary  string `toml:"binary"`
+	Model   string `toml:"model"`
+	FFmpeg  string `toml:"ffmpeg"`
+	// Language é o código ISO do idioma, ou "auto". Cravar "pt" num áudio em
+	// inglês produz transcrição errada com cara de certa, que é pior que
+	// nenhuma.
+	Language       string `toml:"language"`
+	Threads        int    `toml:"threads"`
+	TimeoutMinutes int    `toml:"timeout_minutes"`
+	// MaxSeconds descarta áudio longo demais antes de gastar CPU. O tempo de
+	// transcrição cresce com a duração, e um ciclo de export não pode ficar
+	// atrás de um áudio de uma hora.
+	MaxSeconds int `toml:"max_seconds"`
+}
+
 type FolderRemote struct {
 	Path string `toml:"path"`
 }
@@ -89,8 +112,10 @@ type Config struct {
 	Filter  Filter  `toml:"filter"`
 	Privacy Privacy `toml:"privacy"`
 	Media   Media   `toml:"media"`
-	Remote  Remote  `toml:"remote"`
-	Merge   Merge   `toml:"merge"`
+
+	Transcribe Transcribe `toml:"transcribe"`
+	Remote     Remote     `toml:"remote"`
+	Merge      Merge      `toml:"merge"`
 
 	// Derivados (não vêm do arquivo).
 	SourcePath   string           `toml:"-"`
@@ -113,6 +138,13 @@ func defaults() Config {
 		},
 		Media: Media{
 			MaxFileMB: 20,
+		},
+		Transcribe: Transcribe{
+			Binary:         "whisper-cli",
+			FFmpeg:         "ffmpeg",
+			Language:       "auto",
+			TimeoutMinutes: 10,
+			MaxSeconds:     600,
 		},
 		Remote: Remote{
 			Backend: "folder",
@@ -220,6 +252,32 @@ func (c *Config) finalize() error {
 	if c.Media.MaxFileMB < 1 {
 		c.Media.MaxFileMB = 20
 	}
+	if c.Transcribe.TimeoutMinutes < 1 {
+		c.Transcribe.TimeoutMinutes = 10
+	}
+	if c.Transcribe.MaxSeconds < 1 {
+		c.Transcribe.MaxSeconds = 600
+	}
+	if c.Transcribe.Language == "" {
+		c.Transcribe.Language = "auto"
+	}
+	if c.Transcribe.Binary == "" {
+		c.Transcribe.Binary = "whisper-cli"
+	}
+	if c.Transcribe.FFmpeg == "" {
+		c.Transcribe.FFmpeg = "ffmpeg"
+	}
+	if c.Transcribe.Enabled {
+		if c.Transcribe.Model == "" {
+			return fmt.Errorf(`transcribe.enabled exige transcribe.model (caminho do .bin do Whisper)`)
+		}
+		c.Transcribe.Model = filepath.Clean(os.ExpandEnv(c.Transcribe.Model))
+		// Conferir aqui e não na primeira transcrição: o erro aparece ao subir
+		// o programa, e não horas depois num aviso de log que ninguém lê.
+		if _, err := os.Stat(c.Transcribe.Model); err != nil {
+			return fmt.Errorf("transcribe.model não está acessível em %s: %w", c.Transcribe.Model, err)
+		}
+	}
 	for i, mc := range c.Media.Chats {
 		if strings.TrimSpace(mc.Match) == "" {
 			return fmt.Errorf("media.chat[%d]: match vazio", i)
@@ -234,6 +292,13 @@ func (c *Config) finalize() error {
 			if !MediaKindKnown(k) {
 				return fmt.Errorf("media.chat[%d] (%q): kind desconhecido %q (use %s)",
 					i, mc.Match, k, strings.Join(MediaKinds(), " ou "))
+			}
+			// Áudio sem transcrição não produz nada: o arquivo bruto não é
+			// publicado (um .ogg na nuvem é peso sem leitor), então a linha
+			// ficaria escrita no config sem qualquer efeito.
+			if k == KindAudio && !c.Transcribe.Enabled {
+				return fmt.Errorf(`media.chat[%d] (%q) pede kind "audio", mas [transcribe].enabled está desligado; `+
+					"sem transcrição o áudio não vira nada — ligue a transcrição ou remova o kind", i, mc.Match)
 			}
 		}
 	}
@@ -278,6 +343,12 @@ func (c *Config) MediaDir() string {
 	return filepath.Join(c.Paths.DataDir, "media")
 }
 
+// AudioDir guarda o áudio baixado enquanto ele espera a transcrição. Nada aqui
+// é publicado, e o arquivo é apagado assim que o texto sai.
+func (c *Config) AudioDir() string {
+	return filepath.Join(c.Paths.DataDir, "audio")
+}
+
 // OutDir guarda as cópias locais do que foi publicado.
 func (c *Config) OutDir() string {
 	return filepath.Join(c.Paths.DataDir, "out")
@@ -314,11 +385,17 @@ func (c *Config) ChatAllowed(jid, name string) bool {
 	return false
 }
 
-// mediaKinds são os tipos de anexo que este binário sabe baixar, na ordem em
-// que aparecem na mensagem de erro. Áudio e vídeo ficam de fora de propósito:
-// aceitar o valor no config sem implementar o download faria o programa ignorar
-// em silêncio uma linha que o usuário escreveu esperando efeito.
-var mediaKinds = []string{"image", "document"}
+// mediaKinds são os tipos de anexo que este binário sabe tratar, na ordem em
+// que aparecem na mensagem de erro. Vídeo fica de fora de propósito: aceitar o
+// valor no config sem implementar o tratamento faria o programa ignorar em
+// silêncio uma linha que o usuário escreveu esperando efeito.
+//
+// "audio" não vira arquivo publicado: o que sai é a transcrição. Por isso ele
+// exige [transcribe].enabled — ver a validação em finalize.
+var mediaKinds = []string{"image", "document", "audio"}
+
+// KindAudio é o kind cujo produto é texto, não arquivo.
+const KindAudio = "audio"
 
 // MediaKinds devolve os tipos de anexo suportados.
 func MediaKinds() []string { return append([]string(nil), mediaKinds...) }

@@ -222,7 +222,21 @@ chats que você listar** passam a ser baixados e publicados em
 ```
 
 No digest a linha vira `[documento: cardapio.pdf] · anexo: \`media/…\``, e o
-agente abre o arquivo direto. Áudio continua fora: transcrever é outro problema.
+agente abre o arquivo direto.
+
+**Áudio é diferente: o que sai é a transcrição, não o arquivo.** Com
+`[transcribe]` ligado, a nota de voz é baixada, transcrita nesta máquina pelo
+Whisper e apagada. O digest fica assim:
+
+```
+- `11:22` **Ana**: [áudio (voz) 12s] "consigo revisar hoje, mas o deploy fica pra amanhã"
+```
+
+O marcador de duração continua ali de propósito — um resumo precisa distinguir
+"ela escreveu" de "ela mandou quatro minutos de áudio". O texto completo também
+vai para `media/<host_id>/<sha256>.txt`, porque `max_message_chars` corta o
+corpo e áudio longo passa disso.
+
 Mídia de "ver uma vez" nunca é baixada — o texto continua saindo, o arquivo não.
 
 ### O guia do agente
@@ -305,7 +319,11 @@ Tudo em `config.toml`, sem recompilar. Os campos que você provavelmente vai mex
 | `export.include_status_broadcast` | `false` | Status/stories. Costuma ser ruído. |
 | `media.enabled` | `false` | Trava mestra dos anexos. Desligada, nada é baixado. |
 | `media.max_file_mb` | `20` | Acima disso o anexo é ignorado e fica só o marcador. |
-| `[[media.chat]]` | — | Por chat: `match` (nome ou JID) e `kinds` (`image`, `document`). Chat que não está aqui não baixa nada. |
+| `[[media.chat]]` | — | Por chat: `match` (nome ou JID) e `kinds` (`image`, `document`, `audio`). Chat que não está aqui não baixa nada. |
+| `transcribe.enabled` | `false` | Transcreve áudio nesta máquina. Exigido por `kinds = ["audio"]`. |
+| `transcribe.model` | — | Caminho do `ggml-*.bin`. Obrigatório com `enabled = true`. |
+| `transcribe.language` | `"auto"` | `"pt"`, `"en"`… Cravar o idioma errado produz transcrição errada com cara de certa. |
+| `transcribe.max_seconds` | `600` | Áudio mais longo nem é baixado. |
 
 Baixar anexo muda o que sai da máquina: sem `[media]`, só texto vai para a nuvem.
 Por isso a permissão é por conversa e aditiva — nunca existe uma regra que tire
@@ -318,7 +336,21 @@ enabled = true
 [[media.chat]]
 match = "Família"
 kinds = ["image", "document"]
+
+[[media.chat]]
+match = "Squad Backend"
+kinds = ["audio"]
+
+[transcribe]
+enabled = true
+model = '/opt/whisper/ggml-small.bin'
 ```
+
+Transcrição precisa de dois binários no PATH: um
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp) (`whisper-cli`) e o
+`ffmpeg` — nota de voz é Opus, e o whisper.cpp só lê WAV 16 kHz mono. Faltando
+qualquer um dos dois, o programa **não sobe**: falhar no início é melhor que um
+aviso de log por nota de voz que ninguém lê.
 
 Para descobrir nomes exatos de grupos e preencher os filtros:
 
@@ -505,6 +537,15 @@ nuvem é texto. Com `[media]`, são as fotos e os documentos das conversas que v
 listou. É a mudança de exposição mais significativa do projeto: pense por
 conversa, não por conveniência.
 
+**Transcrição é local, mas o texto não.** O áudio nunca sai da máquina e é
+apagado depois de transcrito — nenhum serviço externo é chamado. Mas o texto do
+que foi falado vai para a pasta, e nota de voz costuma ser mais franca que
+mensagem escrita. Ligue por conversa.
+
+**Transcrição erra.** Whisper acerta bem o sentido geral e erra nome próprio,
+número e valor. O guia do agente avisa para não citar transcrição como citação
+exata; você deveria fazer o mesmo.
+
 ---
 
 ## Sugestões e próximos passos
@@ -522,10 +563,10 @@ Coisas que fazem sentido, em ordem aproximada de retorno:
    Um `last_summarized_ts` gravado pelo agente ao lado do `index.json` permitiria
    resumos incrementais ("o que mudou desde ontem") em vez de sempre 3 dias.
 
-4. **Transcrição de áudio.** Muita conversa de WhatsApp é áudio, e hoje vira
-   `[áudio (voz) 34s]` — invisível para o resumo. Baixar o áudio e passar por
-   Whisper local (`whisper.cpp`) resolveria, ao custo de banda e CPU. É a maior
-   lacuna de conteúdo do projeto hoje.
+4. **Ligue a transcrição de áudio nas conversas que importam.** Já está
+   implementada (`[transcribe]`), desligada por padrão, e é o maior ganho de
+   conteúdo disponível: sem ela, tudo que foi dito em nota de voz é invisível
+   para o resumo. Custa CPU e dois binários no PATH.
 
 5. **Criptografia em repouso.** `age` ou `gpg` no arquivo publicado protege contra
    o provedor de nuvem. Só vale a pena se o agente puder descriptografar — o que
@@ -552,6 +593,7 @@ internal/wa/        whatsmeow: pareamento, eventos, history sync, extração de 
 internal/export/    Record, JSONL, digest Markdown, index
 internal/remote/    backends folder e rclone
 internal/merge/     fusão entre máquinas e as travas anti-regressão
+internal/transcribe/ áudio -> texto com ffmpeg + whisper.cpp local
 ```
 
 Baseado em [tulir/whatsmeow](https://github.com/tulir/whatsmeow).

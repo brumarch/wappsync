@@ -96,6 +96,15 @@ go test ./internal/export/ -run TestDigestGolden -update   # regravar o golden
   - `**/testdata/** -text` — goldens são comparados byte a byte; com CRLF eles
     quebram localmente e continuam **verdes na CI** (Linux), que é o pior modo
     de falha possível.
+- **Não há ffmpeg nem whisper nesta máquina, e a CI também não instala.** Código
+  que roda processo externo (`internal/transcribe`, e o `rclone` em
+  `internal/remote`) é testado com binário falso no PATH: um script que registra
+  os argumentos recebidos e imprime uma saída fixa. Isso cobre o que é nosso — a
+  linha de comando montada e o parse da saída — sem fingir que cobre o resto.
+- **`exec.CommandContext` sozinho não faz timeout funcionar.** Ele mata o filho,
+  mas um neto herda o pipe de stdout e o `Wait` fica preso até ELE terminar.
+  Sempre defina `cmd.WaitDelay`. Sem isso, um whisper travado segura a fila para
+  sempre — e o teste do timeout demora 30s em vez de 200ms.
 - **Nada de banco, sessão ou `config.toml` real versionado.**
 
 ## O que não é testável

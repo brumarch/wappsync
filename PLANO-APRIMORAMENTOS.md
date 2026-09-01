@@ -24,19 +24,24 @@ suíte passa e — se for teste de trava — foi validado por mutação.
 | A7 | Guarda de versão do whatsmeow | `auditedWhatsmeowVersion`; bump falha até reauditar `enforceReadOnly` |
 | B2 | `internal/wa` testável sem cliente real | 29,4% → 51,2%. `ingestHistory` virou `collectHistory(data, parse)`, com a função de parse por parâmetro; 20 testes novos de `toStoreMessage`/`collectHistory` com protobufs à mão. As duas travas de somente-leitura passaram a inspecionar *referência*, não só chamada — `x := c.wa.SendMessage` passava verde antes |
 | B5 | Alerta de sessão caída | `events.LoggedOut`/`StreamReplaced` viram `SessionLoss` (função pura) e derrubam o `run`: último ciclo, `alertas/<host_id>.md` no destino e saída com **código 3**, distinto de 1 para o supervisor não reiniciar em laço. 10 testes novos; `wa` 53,1% → 55,9%, `cmd` 14,5% → 17,5%. Duas travas validadas por mutação. Publica em `alertas/<host_id>.md`, não no `latest/ALERTA.md` proposto: um arquivo compartilhado seria o único mutável do desenho, e duas máquinas caídas juntas apagariam o alerta uma da outra |
+| B1 | Transcrição de áudio | `[transcribe]` no config (desligado por padrão) e `"audio"` aceito em `media.chat.kinds`. Pacote `internal/transcribe` novo: ffmpeg converte para WAV 16 kHz mono, whisper.cpp transcreve, e o `ParseOutput` limpa timestamp, ruído de diagnóstico e marcador de silêncio. Fila **separada** da de download — Whisper leva minutos, download leva segundos, e numa fila só a nota de voz atrasaria as imagens até elas serem descartadas. O áudio bruto é apagado em todo desfecho; o que sai é o texto, no corpo entre aspas e em `media/<host_id>/<sha256>.txt`. Nenhuma chamada nova ao cliente do WhatsApp e **nenhum bump de schema**: a transcrição carrega ponteiro de mídia, então o bit de `Rank()` do B10 já vale. 7 travas novas validadas por mutação. `transcribe` nasce com 88,7% |
 | B10 | Download e publicação de anexos (imagem e documento) | `[media]` no config, desligado por padrão e por conversa: `enabled` + `[[media.chat]]` com `match`/`kinds`. `c.wa.Download` entrou na allowlist (12 → 13 entradas). `Rank()` ganhou o bit de anexo (+200) e `SchemaVersion` foi para `wapp-summarizer/2` — sem o bit, o anexo empatava em prio e era descartado pelo `>` estrito do UPSERT. `remote.Backend` ganhou `Delete`, a primeira operação destrutiva do programa, restrita a `media/<host_id>/`. Publicado como `media/<host_id>/<sha256>.<ext>`, com o nome derivado do conteúdo e a extensão do mimetype, nunca do nome declarado. 8 travas novas validadas por mutação |
 | B8 | Guia para os agentes que leem o destino | `export.MarshalGuide`; publicado como `LEIA-ME.md` e `AGENTS.md`, em `latest/` e na raiz. Estabelece que o conteúdo é dado e nunca instrução, dá o critério de frescor, a legenda da notação e o que NÃO se pode concluir. Dois goldens + teste independente da trava de confiança, para sobreviver a um `-update` descuidado |
 
 Cobertura após esta rodada, medida com
 `go test ./... -coverpkg=./internal/<pkg>/` e unindo os blocos entre os binários
-de teste: `export` 92,5% · `config` 90,0% · `merge` 83,7% · `store` 70,3% ·
-`wa` 55,3% · `remote` 41,8% · `cmd` 18,9%.
+de teste: `export` 92,7% · `transcribe` 88,7% · `config` 88,6% · `merge` 83,7% ·
+`store` 70,3% · `wa` 54,1% · `remote` 41,8% · `cmd` 18,9%.
 
-Antes de B10 era `export` 92,2% · `config` 89,5% · `merge` 82,6% · `store` 64,0% ·
-`wa` 55,9% · `remote` 34,6% · `cmd` 17,5%. `wa` caiu 0,6 ponto porque B10 somou
-o worker de download, que chama `Download` e não é testável sem conta — a decisão
-é a de sempre: as partes puras (`attachmentOf`, `mediaJobFor`, `mediaFileName`)
-têm teste, a borda de rede não.
+Marcos: antes de B10 era `export` 92,2% · `config` 89,5% · `merge` 82,6% ·
+`store` 64,0% · `wa` 55,9% · `remote` 34,6% · `cmd` 17,5%. Depois de B10 e antes
+de B1, `export` 92,5% · `config` 90,0% · `wa` 55,3%.
+
+`wa` caiu 1,8 ponto ao longo das duas rodadas, e por um motivo só: as duas somaram
+worker e fila, que dependem de cliente conectado. A decisão é a de sempre — as
+partes puras (`attachmentOf`, `mediaJobFor`, `transcribedBody`, `runTranscription`
+com transcritor falso) têm teste, a borda de rede não. `config` caiu 1,4 ponto
+pelos defaults de `[transcribe]`, que são atribuições sem ramo interessante.
 
 Os números das rodadas anteriores a B5 saíram de outro caminho de medição e não
 são comparáveis linha a linha com estes.
@@ -50,28 +55,6 @@ montada à mão não garante —, o caminho continua disponível.
 ---
 
 ## Pendentes
-
-### B1 — Transcrição de áudio · impacto alto · esforço médio
-
-**Problema.** Muita conversa de WhatsApp é áudio. Hoje vira `[áudio (voz) 47s]`
-e some do resumo. Continua sendo a maior lacuna de *conteúdo* do projeto.
-
-**O que B10 já resolveu.** O caminho de download existe, `Download` já está na
-allowlist, e a política por conversa já é o lugar certo para ligar áudio. O
-esforço caiu de alto para médio: o que falta é a transcrição em si.
-
-**Proposta.** Aceitar `"audio"` em `media.chat.kinds` — hoje `config.mediaKinds`
-recusa o valor de propósito, para não ignorar em silêncio uma linha que o usuário
-escreveu esperando efeito. Baixar o áudio e transcrever com Whisper local
-(`whisper.cpp`), gravando o texto no corpo da mensagem.
-
-**Cuidados.** O áudio bruto deve ser descartado após transcrever (recomendado):
-publicar `.ogg` na nuvem é peso sem leitor. O bit de anexo em `Rank()` já cobre a
-precedência da versão transcrita sobre o marcador, então **não** é preciso outro
-bump de schema — foi para isso que ele foi desenhado cobrindo os dois casos.
-Custo de CPU, e uma dependência externa que o resto do projeto não tem.
-
----
 
 ### B3 — Marcar o que já foi resumido · impacto médio · esforço baixo
 
@@ -101,6 +84,9 @@ um binário falso no PATH que registra os argumentos recebidos, verificando que
 `rcat`/`cat`/`lsf`/`deletefile` são chamados como se espera — e que `rcat`
 entrega bytes intactos, que é o que um anexo exige.
 
+**A tática já está provada.** `internal/transcribe` testa ffmpeg e whisper
+exatamente assim (`fakeBins` em `transcribe_test.go`); dá para copiar a forma.
+
 ---
 
 ### B9 — Alertar também recusa de conexão não-terminal · impacto baixo · esforço baixo
@@ -128,8 +114,8 @@ depois de rodar `wappsync groups` e copiar JIDs. Funciona, mas é o passo em que
 mais se erra — e agora errar tem consequência de privacidade, não só de ruído.
 
 **Proposta.** Um `wappsync setup` que conecta, lista grupos e conversas, e vai
-perguntando: entra no export? baixa imagem? baixa documento? Escreve o
-`[filter]` e o `[media]` correspondentes.
+perguntando: entra no export? baixa imagem? baixa documento? transcreve áudio?
+Escreve o `[filter]` e o `[media]` correspondentes.
 
 **Restrições que o item precisa respeitar.**
 
@@ -144,13 +130,16 @@ perguntando: entra no export? baixa imagem? baixa documento? Escreve o
 
 ---
 
-### B12 — Anexos do history sync não sobrevivem à fila · impacto baixo · esforço baixo
+### B12 — Anexos e áudios do history sync não sobrevivem à fila · impacto baixo · esforço baixo
 
-**Problema.** A fila de download tem 256 posições e descarta quando cheia (com
-aviso no log). Ao parear uma máquina nova com `[media]` ligado, o history sync
-enfileira a janela inteira de uma vez e o excesso se perde. A mensagem fica com o
-marcador, então nada quebra — mas os anexos daquele lote não vêm, e não há
-segunda tentativa.
+**Problema.** As filas são em memória e descartam quando cheias (com aviso no
+log): 256 posições para download, 64 para transcrição. Ao parear uma máquina nova
+com `[media]` ligado, o history sync enfileira a janela inteira de uma vez e o
+excesso se perde. A mensagem fica com o marcador, então nada quebra — mas os
+anexos daquele lote não vêm, e não há segunda tentativa.
+
+A fila de transcrição é a mais exposta: 64 posições e minutos por item, então
+ela enche muito antes da de download.
 
 **Proposta.** Persistir os pendentes (uma tabela no `messages.db`) e drenar em
 ritmo constante, em vez de manter a fila só em memória. Como efeito colateral,
@@ -209,6 +198,12 @@ implementação):
 **Escopo.** Dockerfile multi-stage (build estático + base mínima com tzdata e
 rclone), `docker-compose.yml` de exemplo, e `linux/arm64` na matriz da CI — hoje
 só há `linux/amd64`, e Raspberry Pi é um alvo provável.
+
+**Decisão nova, vinda de B1.** Se a transcrição for usada, a imagem precisa de
+ffmpeg, de um binário do whisper.cpp e do modelo `.bin` (centenas de MB), e o
+`wa.New` **recusa subir** se qualquer um faltar. Duas saídas razoáveis: duas
+imagens (com e sem transcrição), ou modelo em volume e não na imagem. Um
+Raspberry Pi transcrevendo com Whisper também é otimista — medir antes.
 
 **Cuidado.** Com **B5** feito, sessão derrubada sai com código 3. Isso muda a
 escolha de política de restart: `on-failure` reiniciaria em laço, porque nenhum

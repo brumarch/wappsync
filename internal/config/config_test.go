@@ -454,6 +454,89 @@ func TestMediaChatValidation(t *testing.T) {
 	}
 }
 
+// Trava. Áudio sem transcrição não produz nada: o arquivo bruto não é publicado,
+// então a linha ficaria escrita no config sem qualquer efeito — e o usuário
+// concluiria que o programa está ignorando a configuração dele.
+func TestAudioKindRequiresTranscription(t *testing.T) {
+	body := "host_id = \"m\"\n[media]\nenabled = true\n" +
+		"[[media.chat]]\nmatch = \"Família\"\nkinds = [\"audio\"]\n" +
+		"[remote]\nbackend = \"none\"\n"
+
+	_, err := Load(write(t, body))
+	if err == nil {
+		t.Fatal("kind audio foi aceito sem [transcribe].enabled")
+	}
+	if !strings.Contains(err.Error(), "transcribe") || !strings.Contains(err.Error(), "audio") {
+		t.Errorf("a mensagem não liga uma coisa à outra: %v", err)
+	}
+
+	// Com a transcrição ligada e um modelo real, a mesma configuração carrega.
+	modelo := filepath.Join(t.TempDir(), "ggml.bin")
+	if err := os.WriteFile(modelo, []byte("modelo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	comTranscricao := "host_id = \"m\"\n[media]\nenabled = true\n" +
+		"[[media.chat]]\nmatch = \"Família\"\nkinds = [\"audio\"]\n" +
+		"[transcribe]\nenabled = true\nmodel = " + tomlPath(modelo) + "\n" +
+		"[remote]\nbackend = \"none\"\n"
+	if _, err := Load(write(t, comTranscricao)); err != nil {
+		t.Errorf("configuração válida foi recusada: %v", err)
+	}
+}
+
+func TestTranscribeValidation(t *testing.T) {
+	base := func(extra string) string {
+		return "host_id = \"m\"\n[transcribe]\nenabled = true\n" + extra +
+			"[remote]\nbackend = \"none\"\n"
+	}
+
+	if _, err := Load(write(t, base(""))); err == nil ||
+		!strings.Contains(err.Error(), "transcribe.model") {
+		t.Errorf("modelo ausente: erro = %v", err)
+	}
+
+	ausente := filepath.Join(t.TempDir(), "nao-existe.bin")
+	_, err := Load(write(t, base("model = "+tomlPath(ausente)+"\n")))
+	if err == nil {
+		t.Fatal("modelo inexistente foi aceito")
+	}
+	// A mensagem tem que dizer o caminho: é o que o usuário vai conferir.
+	if !strings.Contains(err.Error(), "nao-existe.bin") {
+		t.Errorf("a mensagem não diz qual caminho falhou: %v", err)
+	}
+}
+
+func TestTranscribeDefaults(t *testing.T) {
+	cfg := minimal(t, "")
+
+	if cfg.Transcribe.Enabled {
+		t.Error("[transcribe].enabled deveria vir desligado")
+	}
+	if cfg.Transcribe.Language != "auto" {
+		t.Errorf("language = %q, queria auto", cfg.Transcribe.Language)
+	}
+	if cfg.Transcribe.MaxSeconds != 600 || cfg.Transcribe.TimeoutMinutes != 10 {
+		t.Errorf("tetos = %ds / %dmin", cfg.Transcribe.MaxSeconds, cfg.Transcribe.TimeoutMinutes)
+	}
+	if cfg.Transcribe.Binary == "" || cfg.Transcribe.FFmpeg == "" {
+		t.Errorf("binários sem default: %+v", cfg.Transcribe)
+	}
+}
+
+func TestMediaAllowedCoversAudio(t *testing.T) {
+	cfg := &Config{Media: Media{Enabled: true, Chats: []MediaChat{
+		{Match: "Família", Kinds: []string{"audio"}},
+	}}}
+
+	if !cfg.MediaAllowed("g@g.us", "Família", "audio") {
+		t.Error("áudio autorizado foi barrado")
+	}
+	// A permissão é por tipo: liberar áudio não libera imagem.
+	if cfg.MediaAllowed("g@g.us", "Família", "image") {
+		t.Error("liberar audio liberou image junto")
+	}
+}
+
 func TestHasFormat(t *testing.T) {
 	cfg := minimal(t, "[export]\nformats = [\"jsonl\"]\n")
 	if !cfg.HasFormat("jsonl") {

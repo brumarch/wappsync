@@ -12,6 +12,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 
+	"github.com/bmar13/wapp-summarizer/internal/config"
 	"github.com/bmar13/wapp-summarizer/internal/export"
 	msgstore "github.com/bmar13/wapp-summarizer/internal/store"
 )
@@ -24,7 +25,11 @@ type attachment struct {
 	// de baixar; não é confiável, então o tamanho real é conferido de novo
 	// depois do download.
 	Length uint64
-	Source whatsmeow.DownloadableMessage
+	// Seconds é a duração declarada, usada só para áudio: o custo de CPU da
+	// transcrição cresce com ela, e um áudio de uma hora não pode segurar a
+	// fila.
+	Seconds uint32
+	Source  whatsmeow.DownloadableMessage
 }
 
 // mediaExts mapeia mimetype para extensão.
@@ -53,6 +58,25 @@ var mediaExts = map[string]string{
 	"text/rtf":   ".rtf",
 }
 
+// audioExts fica separado de mediaExts porque a semântica é outra: nada aqui
+// vira arquivo publicado. O áudio é baixado para um temporário, transcrito e
+// apagado — o que sai da máquina é o texto. Publicar um .ogg na nuvem seria
+// peso que nenhum agente lê.
+//
+// A extensão só serve para o ffmpeg reconhecer a entrada.
+var audioExts = map[string]string{
+	"audio/ogg":   ".ogg",
+	"audio/opus":  ".opus",
+	"audio/mpeg":  ".mp3",
+	"audio/mp4":   ".m4a",
+	"audio/aac":   ".aac",
+	"audio/amr":   ".amr",
+	"audio/wav":   ".wav",
+	"audio/x-wav": ".wav",
+	"audio/webm":  ".webm",
+	"audio/flac":  ".flac",
+}
+
 // extForMime devolve a extensão de um mimetype, ou "" se não for suportado.
 func extForMime(mime string) string {
 	// O mimetype vem com parâmetros com frequência ("image/jpeg; codecs=...").
@@ -60,6 +84,14 @@ func extForMime(mime string) string {
 		mime = mime[:i]
 	}
 	return mediaExts[strings.ToLower(strings.TrimSpace(mime))]
+}
+
+// audioExtForMime devolve a extensão de um áudio transcritível, ou "".
+func audioExtForMime(mime string) string {
+	if i := strings.IndexByte(mime, ';'); i >= 0 {
+		mime = mime[:i]
+	}
+	return audioExts[strings.ToLower(strings.TrimSpace(mime))]
 }
 
 // unwrapOnce devolve o conteúdo de um invólucro (efêmera, documento com
@@ -132,6 +164,17 @@ func attachmentAt(msg *waE2E.Message, depth int) (attachment, bool) {
 			return attachment{}, false
 		}
 		return attachment{Kind: "document", Ext: ext, Length: dm.GetFileLength(), Source: dm}, true
+
+	case msg.GetAudioMessage() != nil:
+		am := msg.GetAudioMessage()
+		ext := audioExtForMime(am.GetMimetype())
+		if ext == "" {
+			return attachment{}, false
+		}
+		return attachment{
+			Kind: config.KindAudio, Ext: ext,
+			Length: am.GetFileLength(), Seconds: am.GetSeconds(), Source: am,
+		}, true
 	}
 	return attachment{}, false
 }
@@ -178,6 +221,19 @@ func (c *Client) mediaJobFor(m msgstore.Message, msg *waE2E.Message) (mediaJob, 
 		c.log.Infof("anexo de %s ignorado: %d MB declarados, limite é %d MB",
 			m.ChatJID, att.Length/(1024*1024), c.cfg.Media.MaxFileMB)
 		return mediaJob{}, false
+	}
+	// Áudio tem um segundo teto, em duração: o custo é de CPU, não de banda,
+	// e transcrever uma hora de gravação seguraria a fila por muito mais tempo
+	// do que o conteúdo justifica.
+	if att.Kind == config.KindAudio {
+		if c.transcriber == nil {
+			return mediaJob{}, false
+		}
+		if max := uint32(c.cfg.Transcribe.MaxSeconds); att.Seconds > max {
+			c.log.Infof("áudio de %s ignorado: %ds acima do limite de %ds",
+				m.ChatJID, att.Seconds, max)
+			return mediaJob{}, false
+		}
 	}
 	return mediaJob{chatJID: m.ChatJID, msgID: m.ID, att: att}, true
 }
@@ -243,6 +299,13 @@ func (c *Client) fetchMedia(job mediaJob) {
 	if uint64(len(data)) > c.mediaMaxBytes() {
 		c.log.Infof("anexo de %s descartado: %d MB reais acima do limite de %d MB",
 			job.chatJID, len(data)/(1024*1024), c.cfg.Media.MaxFileMB)
+		return
+	}
+
+	// Áudio não vira arquivo publicado: segue para a fila de transcrição, e o
+	// que sai da máquina é o texto.
+	if job.att.Kind == config.KindAudio {
+		c.stageAudio(job, data)
 		return
 	}
 

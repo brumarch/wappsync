@@ -78,7 +78,11 @@ max_file_mb = 20
 
 # Por chat, e SÓ nos chats listados. Chat ausente daqui não baixa nada.
 # match: JID completo ou pedaço do nome, igual a [filter].
-# kinds: "image" e/ou "document". (Áudio ainda não; depende de transcrição.)
+# kinds: "image", "document" e/ou "audio".
+#
+# "audio" exige [transcribe] ligado logo abaixo: o áudio bruto nunca é
+# publicado (um .ogg na nuvem é peso que nenhum agente lê), então sem
+# transcrição a linha não produziria nada.
 #
 # [[media.chat]]
 # match = "Família"
@@ -86,7 +90,39 @@ max_file_mb = 20
 #
 # [[media.chat]]
 # match = "120363000000000000@g.us"
-# kinds = ["document"]
+# kinds = ["document", "audio"]
+
+[transcribe]
+# Transcreve nota de voz com Whisper rodando NESTA máquina. Nada é enviado para
+# nenhum serviço: o áudio não sai daqui, só o texto vai para a pasta.
+#
+# O texto entra no corpo da mensagem, entre aspas, junto do marcador de duração
+# ("[áudio (voz) 47s] \"chego às 19h\""), e a transcrição completa também vira
+# arquivo em media/<host_id>/, porque max_message_chars corta o corpo.
+#
+# O áudio baixado é apagado assim que o texto sai.
+enabled = false
+
+# Precisa de dois binários no PATH: um Whisper e o ffmpeg (nota de voz é Opus,
+# e o whisper.cpp só lê WAV 16 kHz mono).
+#   https://github.com/ggml-org/whisper.cpp
+binary = "whisper-cli"
+ffmpeg = "ffmpeg"
+
+# Caminho do modelo. Obrigatório quando enabled = true.
+# Ex.: 'C:/whisper/models/ggml-small.bin' ou '/opt/whisper/ggml-small.bin'
+model = ""
+
+# "auto" detecta o idioma. Cravar "pt" num áudio em inglês produz transcrição
+# errada com cara de certa, que é pior que nenhuma.
+language = "auto"
+
+# 0 deixa o Whisper decidir quantas threads usar.
+threads = 0
+
+# Tetos de segurança. Áudio mais longo que max_seconds nem é baixado.
+timeout_minutes = 10
+max_seconds = 600
 
 [remote]
 # "folder"  -> escreve numa pasta local que o app do Google Drive/OneDrive/Dropbox sincroniza.

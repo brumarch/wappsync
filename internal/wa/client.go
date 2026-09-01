@@ -26,6 +26,7 @@ import (
 
 	"github.com/bmar13/wapp-summarizer/internal/config"
 	msgstore "github.com/bmar13/wapp-summarizer/internal/store"
+	"github.com/bmar13/wapp-summarizer/internal/transcribe"
 )
 
 type Client struct {
@@ -46,6 +47,12 @@ type Client struct {
 	// que faz enqueueMedia virar no-op, sem espalhar o if pelo código.
 	mediaQ    chan mediaJob
 	mediaDone chan struct{}
+
+	// Transcrição tem fila própria: o Whisper leva minutos e o download leva
+	// segundos. Ver startTranscribeWorker.
+	transcriber transcriber
+	transQ      chan transcribeJob
+	transDone   chan struct{}
 }
 
 // New abre a sessão local e monta o cliente do WhatsApp (sem conectar ainda).
@@ -77,17 +84,35 @@ func New(ctx context.Context, cfg *config.Config, db *msgstore.DB, verbose bool)
 		return nil, fmt.Errorf("lendo dispositivo: %w", err)
 	}
 
+	tr, err := newTranscriber(transcribe.Options{
+		Binary:   cfg.Transcribe.Binary,
+		Model:    cfg.Transcribe.Model,
+		FFmpeg:   cfg.Transcribe.FFmpeg,
+		Language: cfg.Transcribe.Language,
+		Threads:  cfg.Transcribe.Threads,
+		Timeout:  time.Duration(cfg.Transcribe.TimeoutMinutes) * time.Minute,
+	}, cfg.Transcribe.Enabled)
+	if err != nil {
+		container.Close()
+		// Falhar aqui, e não no primeiro áudio: transcrição configurada e
+		// quebrada tem que impedir o programa de subir, senão vira um aviso
+		// de log por nota de voz que ninguém lê.
+		return nil, fmt.Errorf("transcrição: %w", err)
+	}
+
 	c := &Client{
-		cfg:       cfg,
-		db:        db,
-		container: container,
-		wa:        whatsmeow.NewClient(device, clientLog),
-		log:       clientLog,
-		names:     map[string]string{},
-		lost:      make(chan SessionLoss, 1),
+		cfg:         cfg,
+		db:          db,
+		container:   container,
+		wa:          whatsmeow.NewClient(device, clientLog),
+		log:         clientLog,
+		names:       map[string]string{},
+		lost:        make(chan SessionLoss, 1),
+		transcriber: tr,
 	}
 	enforceReadOnly(c.wa)
 	c.startMediaWorker()
+	c.startTranscribeWorker()
 	c.wa.AddEventHandler(c.handleEvent)
 	return c, nil
 }
@@ -124,6 +149,8 @@ func (c *Client) Close() {
 	// Antes do Disconnect: o worker pode estar baixando, e ele escreve no
 	// banco que o chamador fecha logo em seguida.
 	c.stopMediaWorker()
+	// Depois da fila de download: ela ainda pode estar enfileirando áudio.
+	c.stopTranscribeWorker()
 	if c.wa != nil {
 		c.wa.Disconnect()
 	}
