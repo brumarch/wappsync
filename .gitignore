@@ -4,13 +4,27 @@
 *.db-shm
 *.db-wal
 
-# Configuração real (contém caminhos/remotes pessoais)
+# Configuração real (contém caminhos, nomes de conversas e remotes pessoais).
+# O til cobre a cópia que editores deixam para trás: `config.toml` sozinho já
+# deixou um `config.toml~` inteiro entrar no repositório.
 config.toml
+config.toml.*
+config.local.toml
+config.toml~
 
 # Saídas de export
 /out/
 *.jsonl
 *.jsonl.gz
+
+# Backups e sobras de editor. Vêm antes da negação abaixo de propósito: em
+# .gitignore quem casa por último vence, e a negação de testdata precisa ser a
+# última palavra sobre o que está lá dentro.
+*~
+*.bak
+*.orig
+*.rej
+*.swp
 
 # ...mas fixtures e goldens de teste TÊM que ser versionados.
 # Esta negação precisa vir depois dos padrões acima.

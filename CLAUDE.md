@@ -108,7 +108,12 @@ go test ./internal/export/ -run TestDigestGolden -update   # regravar o golden
   mas um neto herda o pipe de stdout e o `Wait` fica preso até ELE terminar.
   Sempre defina `cmd.WaitDelay`. Sem isso, um whisper travado segura a fila para
   sempre — e o teste do timeout demora 30s em vez de 200ms.
-- **Nada de banco, sessão ou `config.toml` real versionado.**
+- **Nada de banco, sessão ou `config.toml` real versionado.** A regra era só
+  `config.toml`, e um `config.toml~` deixado por editor entrou no repositório
+  assim mesmo. Hoje o `.gitignore` cobre as variações e os backups em geral, e
+  `TestGitignoreCobreOConfigEOsBackups` chama o `git check-ignore` de verdade —
+  padrão de .gitignore não se confere de cabeça, porque a ordem decide e a
+  negação de `testdata/` anula quem veio antes.
 
 ## O que não é testável
 
