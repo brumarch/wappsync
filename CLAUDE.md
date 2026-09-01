@@ -38,8 +38,10 @@ nunca um reflexo para calar o teste.
 Várias máquinas escrevem na mesma pasta de nuvem, sem coordenação, sobre uma
 sincronização eventualmente consistente. Quatro mecanismos, em camadas:
 
-1. Cada máquina só escreve `shards/<host_id>.jsonl` — sem arquivo mutável
-   compartilhado, não existe *lost update*.
+1. Cada máquina só escreve arquivos com o próprio nome — `shards/<host_id>.jsonl`
+   e `alertas/<host_id>.md`. Sem arquivo mutável compartilhado, não existe
+   *lost update*. Um `latest/ALERTA.md` comum seria a exceção que reabre a
+   classe inteira; `TestAlertFileIsPerHost` trava isso.
 2. Precedência por `prio`, não por ordem de chegada: o UPSERT tem
    `WHERE excluded.prio > messages.prio`.
 3. O shard próprio se funde com a versão já publicada antes de subir.

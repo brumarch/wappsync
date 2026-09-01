@@ -43,11 +43,31 @@ Flags globais:
   -v                  Log detalhado do whatsmeow
 `
 
+// exitSessionLost é o código de saída quando o pareamento com o WhatsApp cai.
+//
+// Distinto de 1 de propósito: reiniciar não resolve — é preciso rodar
+// `wappsync login` na máquina. Um supervisor configurado para reiniciar em
+// qualquer falha (Docker `restart: on-failure`, systemd `Restart=always`)
+// entraria em laço; com um código próprio dá para excluir só este caso
+// (systemd: `RestartPreventExitStatus=3`).
+const exitSessionLost = 3
+
+// errSessionLost marca o erro que vira exitSessionLost.
+var errSessionLost = errors.New("captura interrompida")
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "erro: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitCodeFor(err))
 	}
+}
+
+// exitCodeFor separa "o pareamento caiu" de qualquer outra falha.
+func exitCodeFor(err error) int {
+	if errors.Is(err, errSessionLost) {
+		return exitSessionLost
+	}
+	return 1
 }
 
 func run() error {
@@ -233,7 +253,10 @@ func cmdRun(ctx context.Context, cfg *config.Config, verbose, once bool) error {
 	if err := client.Connect(ctx); err != nil {
 		return err
 	}
-	fmt.Printf("Conectado como %s (máquina %q)\n", client.JID(), cfg.HostID)
+	// O JID é lido uma vez: ao desvincular, o whatsmeow zera o Store.ID, e o
+	// ciclo final publicaria um shard sem device_jid.
+	deviceJID := client.JID()
+	fmt.Printf("Conectado como %s (máquina %q)\n", deviceJID, cfg.HostID)
 	fmt.Printf("Janela: %d dia(s) · publicando a cada %d min · destino: %s\n",
 		cfg.WindowDays, cfg.Export.IntervalMinutes, describeRemote(cfg))
 
@@ -241,11 +264,13 @@ func cmdRun(ctx context.Context, cfg *config.Config, verbose, once bool) error {
 	select {
 	case <-ctx.Done():
 		return nil
+	case loss := <-client.SessionLost():
+		return finishSessionLost(cfg, db, deviceJID, loss)
 	case <-time.After(20 * time.Second):
 	}
 
 	for {
-		if err := cycle(ctx, cfg, db, client.JID(), time.Now()); err != nil {
+		if err := cycle(ctx, cfg, db, deviceJID, time.Now()); err != nil {
 			fmt.Fprintf(os.Stderr, "ciclo falhou: %v\n", err)
 		}
 		if once {
@@ -256,13 +281,79 @@ func cmdRun(ctx context.Context, cfg *config.Config, verbose, once bool) error {
 			fmt.Println("\nEncerrando; publicando um último ciclo...")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			if err := cycle(shutdownCtx, cfg, db, client.JID(), time.Now()); err != nil {
+			if err := cycle(shutdownCtx, cfg, db, deviceJID, time.Now()); err != nil {
 				fmt.Fprintf(os.Stderr, "ciclo final falhou: %v\n", err)
 			}
 			return nil
+		case loss := <-client.SessionLost():
+			return finishSessionLost(cfg, db, deviceJID, loss)
 		case <-time.After(cfg.Interval()):
 		}
 	}
+}
+
+// finishSessionLost fecha o `run` quando o pareamento cai: publica o que já foi
+// capturado, deixa o alerta no destino e devolve o erro que vira exitSessionLost.
+//
+// A ordem importa. O ciclo final vem PRIMEIRO para que o "publicado em" do
+// alerta seja posterior ao generated_at do shard — é essa comparação que diz,
+// meses depois, se o alerta ainda vale. Invertida, todo alerta nasceria
+// parecendo já resolvido.
+//
+// O contexto é novo de propósito: o ctx do comando pode já estar cancelado
+// (SIGTERM junto com a queda), e mesmo assim é preciso conseguir publicar.
+func finishSessionLost(cfg *config.Config, db *store.DB, deviceJID string, loss wa.SessionLoss) error {
+	fmt.Fprintf(os.Stderr, "\nCAPTURA INTERROMPIDA: %s\n%s\n", loss.Reason, loss.Fix)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := cycle(ctx, cfg, db, deviceJID, time.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "ciclo final falhou: %v\n", err)
+	}
+
+	alert := export.Alert{
+		Host:      cfg.HostID,
+		DeviceJID: deviceJID,
+		Reason:    loss.Reason,
+		Fix:       loss.Fix,
+		LostAt:    loss.At,
+		At:        time.Now(),
+	}
+	if path, err := publishAlert(ctx, cfg, alert); err != nil {
+		fmt.Fprintf(os.Stderr, "aviso: não consegui publicar o alerta: %v\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "alerta publicado em %s\n", path)
+	}
+
+	return fmt.Errorf("%w: %s — %s", errSessionLost, loss.Reason, loss.Fix)
+}
+
+// publishAlert grava o alerta desta máquina no destino e uma cópia local.
+// Devolve o caminho publicado, para o log.
+func publishAlert(ctx context.Context, cfg *config.Config, a export.Alert) (string, error) {
+	body := export.MarshalAlert(a, time.Local)
+
+	if err := os.MkdirAll(cfg.OutDir(), 0o700); err != nil {
+		return "", err
+	}
+	local := filepath.Join(cfg.OutDir(), "ALERTA.md")
+	if err := os.WriteFile(local, body, 0o600); err != nil {
+		return "", err
+	}
+
+	be, err := remote.New(cfg)
+	if err != nil {
+		return local, err
+	}
+	if be == nil {
+		return local, nil
+	}
+	rel := export.AlertFile(cfg.HostID)
+	if err := be.Put(ctx, rel, body); err != nil {
+		return local, err
+	}
+	return rel, nil
 }
 
 func cmdExport(ctx context.Context, cfg *config.Config) error {
@@ -347,6 +438,17 @@ func cmdStatus(ctx context.Context, cfg *config.Config, verbose bool) error {
 	for _, s := range idx.Shards {
 		age := time.Since(s.GeneratedAt).Round(time.Minute)
 		fmt.Printf("  shard %-16s %6d msgs · atualizado há %s\n", s.Host, s.Messages, age)
+	}
+
+	// Alertas de sessão caída. Uma máquina parada é a diferença entre "não
+	// aconteceu nada" e "ninguém estava ouvindo" — e é o que o status existe
+	// para mostrar sem que você precise abrir a pasta.
+	if names, err := be.List(ctx, export.AlertDir); err == nil && len(names) > 0 {
+		fmt.Printf("\nALERTAS de sessão caída (%d):\n", len(names))
+		for _, n := range names {
+			fmt.Printf("  %s/%s — abra o arquivo; se o shard da máquina for mais recente, ela voltou\n",
+				export.AlertDir, n)
+		}
 	}
 	return nil
 }

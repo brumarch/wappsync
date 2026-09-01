@@ -37,6 +37,10 @@ type Client struct {
 
 	mu    sync.RWMutex
 	names map[string]string // jid -> melhor nome conhecido
+
+	// lost recebe o primeiro motivo pelo qual a captura parou. Bufferizado em
+	// 1: quem sinaliza são as goroutines do whatsmeow, que não podem bloquear.
+	lost chan SessionLoss
 }
 
 // New abre a sessão local e monta o cliente do WhatsApp (sem conectar ainda).
@@ -75,6 +79,7 @@ func New(ctx context.Context, cfg *config.Config, db *msgstore.DB, verbose bool)
 		wa:        whatsmeow.NewClient(device, clientLog),
 		log:       clientLog,
 		names:     map[string]string{},
+		lost:      make(chan SessionLoss, 1),
 	}
 	enforceReadOnly(c.wa)
 	c.wa.AddEventHandler(c.handleEvent)
@@ -235,6 +240,15 @@ func (c *Client) RefreshNames(ctx context.Context) error {
 
 func (c *Client) handleEvent(rawEvt any) {
 	ctx := context.Background()
+
+	// Perda de pareamento vem antes de tudo: a partir daqui nada mais é
+	// capturado, e o `run` precisa saber disso para alertar e sair.
+	if loss, ok := sessionLossFor(rawEvt); ok {
+		c.log.Errorf("captura interrompida: %s — %s", loss.Reason, loss.Fix)
+		c.signalLoss(loss)
+		return
+	}
+
 	switch evt := rawEvt.(type) {
 	case *events.Message:
 		c.ingest(ctx, evt, "live")
@@ -256,10 +270,6 @@ func (c *Client) handleEvent(rawEvt any) {
 			c.setName(evt.JID.String(), evt.Name.Name)
 			_ = c.db.UpsertChat(ctx, msgstore.Chat{JID: evt.JID.String(), Name: evt.Name.Name, IsGroup: true})
 		}
-	case *events.LoggedOut:
-		c.log.Errorf("desconectado pelo WhatsApp (%s); rode `wappsync login` de novo", evt.Reason)
-	case *events.StreamReplaced:
-		c.log.Errorf("outra sessão assumiu este dispositivo — não use o mesmo session.db em duas máquinas")
 	}
 }
 

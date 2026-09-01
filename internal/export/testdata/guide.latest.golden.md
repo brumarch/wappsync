@@ -32,6 +32,11 @@ o horário atual. Se a máquina mais recente parou de publicar há muito mais qu
 o intervalo normal, alguma coisa caiu — **diga isso no resumo** em vez de
 apresentar dado velho como se fosse atual.
 
+Se existir `../alertas/`, uma máquina publicou ali o aviso de que perdeu o
+pareamento e parou de capturar. Cada arquivo diz quando parou e como saber se
+o aviso ainda vale. Um alerta em vigor significa buraco no histórico: a
+ausência de mensagens no período não é prova de que nada aconteceu.
+
 ## Legenda do digest
 
 | No texto | Significa |

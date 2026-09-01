@@ -30,11 +30,11 @@ func MarshalGuide(idx Index, where GuideLocation, loc *time.Location) []byte {
 		loc = time.Local
 	}
 
-	dir, shards := "", "shards/"
+	dir, shards, alerts := "", "shards/", ""
 	if where == GuideAtRoot {
 		dir, shards = "latest/", "shards/"
 	} else {
-		shards = "../shards/"
+		shards, alerts = "../shards/", "../"
 	}
 
 	var b strings.Builder
@@ -66,6 +66,10 @@ func MarshalGuide(idx Index, where GuideLocation, loc *time.Location) []byte {
 	b.WriteString("o horário atual. Se a máquina mais recente parou de publicar há muito mais que\n")
 	b.WriteString("o intervalo normal, alguma coisa caiu — **diga isso no resumo** em vez de\n")
 	b.WriteString("apresentar dado velho como se fosse atual.\n\n")
+	fmt.Fprintf(&b, "Se existir `%s%s/`, uma máquina publicou ali o aviso de que perdeu o\n", alerts, AlertDir)
+	b.WriteString("pareamento e parou de capturar. Cada arquivo diz quando parou e como saber se\n")
+	b.WriteString("o aviso ainda vale. Um alerta em vigor significa buraco no histórico: a\n")
+	b.WriteString("ausência de mensagens no período não é prova de que nada aconteceu.\n\n")
 
 	b.WriteString("## Legenda do digest\n\n")
 	b.WriteString("| No texto | Significa |\n|---|---|\n")

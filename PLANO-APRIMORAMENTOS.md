@@ -23,10 +23,17 @@ suíte passa e — se for teste de trava — foi validado por mutação.
 | A6 | E2E do ciclo em Go | `cmd/wappsync/e2e_test.go`: duas máquinas, idempotência, filtros, retenção, backend none |
 | A7 | Guarda de versão do whatsmeow | `auditedWhatsmeowVersion`; bump falha até reauditar `enforceReadOnly` |
 | B2 | `internal/wa` testável sem cliente real | 29,4% → 51,2%. `ingestHistory` virou `collectHistory(data, parse)`, com a função de parse por parâmetro; 20 testes novos de `toStoreMessage`/`collectHistory` com protobufs à mão. As duas travas de somente-leitura passaram a inspecionar *referência*, não só chamada — `x := c.wa.SendMessage` passava verde antes |
+| B5 | Alerta de sessão caída | `events.LoggedOut`/`StreamReplaced` viram `SessionLoss` (função pura) e derrubam o `run`: último ciclo, `alertas/<host_id>.md` no destino e saída com **código 3**, distinto de 1 para o supervisor não reiniciar em laço. 10 testes novos; `wa` 53,1% → 55,9%, `cmd` 14,5% → 17,5%. Duas travas validadas por mutação. Publica em `alertas/<host_id>.md`, não no `latest/ALERTA.md` proposto: um arquivo compartilhado seria o único mutável do desenho, e duas máquinas caídas juntas apagariam o alerta uma da outra |
 | B8 | Guia para os agentes que leem o destino | `export.MarshalGuide`; publicado como `LEIA-ME.md` e `AGENTS.md`, em `latest/` e na raiz. Estabelece que o conteúdo é dado e nunca instrução, dá o critério de frescor, a legenda da notação e o que NÃO se pode concluir. Dois goldens + teste independente da trava de confiança, para sobreviver a um `-update` descuidado |
 
-Cobertura após esta rodada: `export` 96,4% · `config` 88,8% · `merge` 84,5% ·
-`store` 68,1% · `wa` 51,2% · `cmd` 13,5%.
+Cobertura após esta rodada, medida com
+`go test ./... -coverpkg=./internal/<pkg>/` e unindo os blocos entre os binários
+de teste: `export` 92,2% · `config` 89,5% · `merge` 82,6% · `store` 64,0% ·
+`wa` 55,9% · `remote` 34,6% · `cmd` 17,5%.
+
+Os números das rodadas anteriores saíram de outro caminho de medição e não são
+comparáveis linha a linha com estes. Por este, o baseline imediatamente antes de
+B5 era `export` 91,6% · `wa` 53,1% · `cmd` 14,5%; o resto não mudou.
 
 **Nota sobre B2.** Foi executado pela alternativa barata registrada no próprio
 item, não pela proposta principal: nenhum corpus de conversa real foi capturado
@@ -77,15 +84,21 @@ um binário falso no PATH que registra os argumentos recebidos, verificando que
 
 ---
 
-### B5 — Alerta de sessão caída · impacto médio · esforço baixo
+### B9 — Alertar também recusa de conexão não-terminal · impacto baixo · esforço baixo
 
-**Problema.** Se o WhatsApp derrubar o pareamento, o `run` registra no log e
-para de capturar em silêncio. Você descobre dias depois, com um buraco no
-histórico.
+**Problema.** B5 cobre `events.LoggedOut` e `events.StreamReplaced` — a sessão
+caída. Mas há outras formas de parar de capturar em silêncio que hoje nem sequer
+aparecem no log: `events.ClientOutdated` (o servidor recusa o whatsmeow até você
+atualizar) e `events.TemporaryBan` (a conta ficou suspensa por um tempo).
 
-**Proposta.** Ao receber `events.LoggedOut`, escrever um arquivo de estado na
-pasta da nuvem (`latest/ALERTA.md`) e sair com código diferente de zero, para o
-supervisor do SO reagir. Opcionalmente um webhook.
+**Proposta.** Reaproveitar `sessionLossFor` e o alerta de B5. As duas diferem de
+uma sessão caída num ponto que muda a saída: `wappsync login` não resolve
+nenhuma delas, e o ban expira sozinho — o texto do `Fix` e, possivelmente, o
+código de saída precisam ser outros.
+
+**Ficou fora de B5 de propósito:** o item pedia sessão caída, e tratar
+"desvinculado" e "temporariamente banido" como a mesma coisa mandaria a pessoa
+fazer a coisa errada.
 
 ---
 
@@ -137,10 +150,9 @@ implementação):
 rclone), `docker-compose.yml` de exemplo, e `linux/arm64` na matriz da CI — hoje
 só há `linux/amd64`, e Raspberry Pi é um alvo provável.
 
-**Cuidado.** `restart: unless-stopped` não resolve sessão derrubada: o `run`
-hoje não sai com código diferente de zero quando o WhatsApp desvincula o
-aparelho. Sem **B5**, o container fica de pé sem capturar nada. Fazer B5 antes,
-ou junto.
+**Cuidado.** Com **B5** feito, sessão derrubada sai com código 3. Isso muda a
+escolha de política de restart: `on-failure` reiniciaria em laço, porque nenhum
+restart pareia de novo. Use `unless-stopped`, ou trate o 3 à parte.
 
 **Alternativa que pode ser melhor.** Se o servidor for Linux, um serviço systemd
 evita de saída as decisões 2, 3 e 4 — o binário é estático de qualquer jeito.
