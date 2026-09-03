@@ -126,6 +126,74 @@ func TestToStoreMessageKnownNameBeatsPushName(t *testing.T) {
 	}
 }
 
+func lid(n string) types.JID { return types.NewJID(n, types.HiddenUserServer) }
+
+// O WhatsApp identifica muitos remetentes por LID, mas a agenda só conhece o
+// telefone. O nome do contato salvo tem que ser achado pelo SenderAlt, ganhar
+// do PushName e ficar memorizado sob o LID — inclusive para nomear a conversa
+// individual, cujo JID é o próprio LID.
+func TestToStoreMessageResolvesNameViaSenderAlt(t *testing.T) {
+	c := testClient(nil)
+	phone := user("5511999990000")
+	c.setName(phone.String(), "Maria (trabalho)") // como RefreshNames grava a agenda
+
+	evt := liveMsg(lid("98765432101234"), lid("98765432101234"), "A", time.Now(), textMsg("oi"))
+	evt.Info.SenderAlt = phone
+	m, ok := c.toStoreMessage(evt, "live")
+	if !ok {
+		t.Fatal("mensagem descartada")
+	}
+	if m.SenderName != "Maria (trabalho)" {
+		t.Errorf("SenderName = %q, queria o nome da agenda via SenderAlt", m.SenderName)
+	}
+	if m.SenderJID != "98765432101234@lid" {
+		t.Errorf("SenderJID = %q, o endereço principal não muda", m.SenderJID)
+	}
+	if got := c.getName("98765432101234@lid"); got != "Maria (trabalho)" {
+		t.Errorf("nome não memorizado sob o LID: %q", got)
+	}
+	if got := c.getName(m.ChatJID); got != "Maria (trabalho)" {
+		t.Errorf("conversa individual por LID sem nome: %q", got)
+	}
+}
+
+// Sem alternativo conhecido, o comportamento antigo continua: vale o PushName.
+func TestToStoreMessageUnknownAltKeepsPushName(t *testing.T) {
+	c := testClient(nil)
+	evt := liveMsg(group("123-456"), lid("98765432101234"), "A", time.Now(), textMsg("oi"))
+	evt.Info.SenderAlt = user("5511999990000")
+
+	m, ok := c.toStoreMessage(evt, "live")
+	if !ok {
+		t.Fatal("mensagem descartada")
+	}
+	if m.SenderName != "Fulano" {
+		t.Errorf("SenderName = %q, queria o PushName", m.SenderName)
+	}
+}
+
+// Numa conversa individual por LID, a mensagem que eu mando pode ser a
+// primeira do chat: o nome vem do RecipientAlt, sem esperar resposta.
+func TestToStoreMessageFromMeNamesLIDChatViaRecipientAlt(t *testing.T) {
+	c := testClient(nil)
+	phone := user("5511999990000")
+	c.setName(phone.String(), "Maria (trabalho)")
+
+	evt := liveMsg(lid("98765432101234"), user("5511888880000"), "A", time.Now(), textMsg("oi"))
+	evt.Info.IsFromMe = true
+	evt.Info.RecipientAlt = phone
+	m, ok := c.toStoreMessage(evt, "live")
+	if !ok {
+		t.Fatal("mensagem descartada")
+	}
+	if m.SenderName != "eu" {
+		t.Errorf("SenderName = %q", m.SenderName)
+	}
+	if got := c.getName("98765432101234@lid"); got != "Maria (trabalho)" {
+		t.Errorf("conversa por LID sem nome após mensagem minha: %q", got)
+	}
+}
+
 func TestToStoreMessageFromMe(t *testing.T) {
 	c := testClient(nil)
 	evt := liveMsg(user("5511999990000"), user("5511888880000"), "A", time.Now(), textMsg("já vou"))

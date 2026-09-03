@@ -352,13 +352,19 @@ func (c *Client) toStoreMessage(evt *events.Message, source string) (msgstore.Me
 
 	sender := evt.Info.Sender.ToNonAD()
 	senderName := evt.Info.PushName
-	if n := c.getName(sender.String()); n != "" {
+	if n := c.knownName(sender, evt.Info.SenderAlt); n != "" {
 		senderName = n
 	} else if senderName != "" {
 		c.setName(sender.String(), senderName)
 	}
 	if evt.Info.IsFromMe {
 		senderName = "eu"
+		// Numa conversa individual endereçada por LID, o que eu mando pode ser
+		// a primeira mensagem do chat: sem isto o nome só seria aprendido
+		// quando a outra pessoa escrevesse.
+		if !evt.Info.IsGroup {
+			c.knownName(chat, evt.Info.RecipientAlt)
+		}
 	}
 
 	// Uma edição/revogação se refere a outra mensagem: grava sob o ID do alvo
@@ -515,6 +521,32 @@ func (c *Client) getName(jid string) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.names[jid]
+}
+
+// knownName resolve o nome de um JID, caindo no endereço alternativo quando o
+// principal é desconhecido.
+//
+// O WhatsApp passou a identificar usuários por LID (`@lid`) em vez de telefone,
+// e a agenda — de onde vem o nome de um contato salvo — só conhece o telefone.
+// Sem esta ponte, um contato salvo aparecia no digest pelo número do LID, que
+// nem telefone é. O whatsmeow entrega o outro endereço em SenderAlt/RecipientAlt
+// nas mensagens ao vivo; o history sync não preenche esses campos, então ali o
+// alternativo chega vazio e nada muda. O nome achado pelo alternativo é
+// memorizado sob o principal: a próxima mensagem, e o UpsertChat de uma
+// conversa individual, resolvem direto.
+func (c *Client) knownName(jid, alt types.JID) string {
+	key := jid.ToNonAD().String()
+	if n := c.getName(key); n != "" {
+		return n
+	}
+	if alt.IsEmpty() {
+		return ""
+	}
+	n := c.getName(alt.ToNonAD().String())
+	if n != "" {
+		c.setName(key, n)
+	}
+	return n
 }
 
 // chatName resolve o melhor nome conhecido de um chat, caindo no banco quando a
