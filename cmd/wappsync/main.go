@@ -32,6 +32,8 @@ Uso:
 Comandos:
   init      Cria um config.toml comentado no diretório atual.
   login     Pareia ESTA máquina como um novo aparelho conectado (QR ou código).
+  setup     Questionário: quais conversas exportar, quais anexos baixar, se
+            transcreve áudio. Grava [filter], [media] e [transcribe] no config.
   run       Captura mensagens e publica a cada intervalo. É o modo normal.
   export    Gera e publica uma vez, a partir do que já está no banco local.
   merge     Só consolida os shards das máquinas em latest/.
@@ -105,7 +107,7 @@ func run() error {
 			"  - host_id               (um nome curto para esta máquina)\n\n"+
 			"Depois rode: wappsync login\n", path)
 		return nil
-	case "login", "run", "export", "merge", "status", "groups", "logout":
+	case "login", "setup", "run", "export", "merge", "status", "groups", "logout":
 	default:
 		fmt.Print(usage)
 		return fmt.Errorf("comando desconhecido: %q", cmd)
@@ -128,6 +130,8 @@ func run() error {
 	switch cmd {
 	case "login":
 		return cmdLogin(ctx, cfg, *verbose, *phone, *fullHistory)
+	case "setup":
+		return cmdSetup(ctx, cfg, *verbose)
 	case "run":
 		return cmdRun(ctx, cfg, *verbose, *once)
 	case "export":

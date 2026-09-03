@@ -24,6 +24,7 @@ suíte passa e — se for teste de trava — foi validado por mutação.
 | A7 | Guarda de versão do whatsmeow | `auditedWhatsmeowVersion`; bump falha até reauditar `enforceReadOnly` |
 | B2 | `internal/wa` testável sem cliente real | 29,4% → 51,2%. `ingestHistory` virou `collectHistory(data, parse)`, com a função de parse por parâmetro; 20 testes novos de `toStoreMessage`/`collectHistory` com protobufs à mão. As duas travas de somente-leitura passaram a inspecionar *referência*, não só chamada — `x := c.wa.SendMessage` passava verde antes |
 | B5 | Alerta de sessão caída | `events.LoggedOut`/`StreamReplaced` viram `SessionLoss` (função pura) e derrubam o `run`: último ciclo, `alertas/<host_id>.md` no destino e saída com **código 3**, distinto de 1 para o supervisor não reiniciar em laço. 10 testes novos; `wa` 53,1% → 55,9%, `cmd` 14,5% → 17,5%. Duas travas validadas por mutação. Publica em `alertas/<host_id>.md`, não no `latest/ALERTA.md` proposto: um arquivo compartilhado seria o único mutável do desenho, e duas máquinas caídas juntas apagariam o alerta uma da outra |
+| B11 | Setup interativo via CLI | `wappsync setup`, no desenho reduzido: três perguntas globais (exporta tudo? transcreve? baixa imagem/documento/áudio de todas?) e uma lista numerada para as exceções — nunca conversa por conversa. Grava JID, não nome, com o nome em comentário. Substitui só `[filter]`, `[media]` e `[transcribe]` no `config.toml` existente, preservando o resto byte a byte (inclusive CRLF), mostra o bloco antes, pede confirmação com padrão NÃO, valida o resultado com o mesmo `config.Load` do programa num temporário e só então troca, deixando `config.toml.bak`. Conecta com uma cópia do config sem anexo nem transcrição: o setup decide política, não executa a antiga, e um whisper ausente não impede o comando que serve para consertá-lo. Nenhuma chamada nova ao cliente do WhatsApp. 6 travas validadas por mutação. `cmd` 18,9% → 51,0% |
 | B16 | Mídia de todos os chats, com exceções | A allowlist `[[media.chat]]` passou a ser um dos três blocos de `[media]`, na mesma forma de `[filter]`: `kinds` baixa os tipos listados de todo chat exportado, `[[media.exclude]]` tira tipos de chats específicos e prevalece sobre tudo, `[[media.chat]]` continua como acréscimo por chat. Default segue "não baixa nada": `kinds` nasce vazio, e `enabled` sozinho não autoriza. `"audio"` em `kinds` exige `[transcribe]` como antes; em `exclude` não, porque exceção sem efeito não engana ninguém. Nenhuma chamada nova ao cliente do WhatsApp. 4 travas validadas por mutação |
 | B15 | Alerta de sessão caída se apaga ao voltar | Portado da branch `alerta-sessao-caida`, que resolvia o B5 por outro caminho e tinha esta ideia a mais. Depois do primeiro ciclo bem-sucedido, `clearAlert` remove `alertas/<host_id>.md` e a cópia local. Não é no `Connect`: conectar não é capturar, e num laço de reconexão o aviso sumiria a cada tentativa. A justificativa original do B5 para não apagar — "o backend não tem Delete" — deixou de valer em B10. O critério de validade por data continua como segunda linha, porque máquina fora do ar não apaga nada. 2 travas validadas por mutação |
 | B14 | Correção: anexo pulado em silêncio | O nome do chat era lido só da memória, que nasce vazia e só é preenchida segundos após o `Connected` — com `match` por nome, o anexo era pulado sem log. `mediaJobFor` passou a receber o nome por parâmetro e `ingest` resolve memória → banco. Skip por política virou log em INFO com nome E JID. `wappsync status` parou de engolir o erro do `wa.New` (whisper ausente ficava invisível) e `wappsync groups` ganhou a política de mídia resolvida por conversa. 2 travas validadas por mutação |
@@ -34,7 +35,7 @@ suíte passa e — se for teste de trava — foi validado por mutação.
 Cobertura após esta rodada, medida com
 `go test ./... -coverpkg=./internal/<pkg>/` e unindo os blocos entre os binários
 de teste: `export` 92,7% · `transcribe` 88,7% · `config` 88,6% · `merge` 83,7% ·
-`store` 70,3% · `wa` 54,1% · `remote` 41,8% · `cmd` 18,9%.
+`store` 70,3% · `wa` 54,1% · `cmd` 51,0% · `remote` 41,8%.
 
 Marcos: antes de B10 era `export` 92,2% · `config` 89,5% · `merge` 82,6% ·
 `store` 64,0% · `wa` 55,9% · `remote` 34,6% · `cmd` 17,5%. Depois de B10 e antes
@@ -107,29 +108,6 @@ código de saída precisam ser outros.
 **Ficou fora de B5 de propósito:** o item pedia sessão caída, e tratar
 "desvinculado" e "temporariamente banido" como a mesma coisa mandaria a pessoa
 fazer a coisa errada.
-
----
-
-### B11 — Setup interativo via CLI · impacto médio · esforço médio
-
-**Problema.** Escolher conversas e política de anexo hoje é editar TOML à mão
-depois de rodar `wappsync groups` e copiar JIDs. Funciona, mas é o passo em que
-mais se erra — e agora errar tem consequência de privacidade, não só de ruído.
-
-**Proposta.** Um `wappsync setup` que conecta, lista grupos e conversas, e vai
-perguntando: entra no export? baixa imagem? baixa documento? transcreve áudio?
-Escreve o `[filter]` e o `[media]` correspondentes.
-
-**Restrições que o item precisa respeitar.**
-
-1. Só funciona depois do `login` — listar grupos exige conexão.
-2. Não pode atropelar um `config.toml` editado à mão. Mostrar o diff e pedir
-   confirmação, ou gravar ao lado.
-3. Escrever `"Família"` num TOML a partir de um terminal Windows cai direto na
-   armadilha de UTF-8 do `CLAUDE.md`. Gravar com encoding explícito e ter um
-   teste com acento no nome do grupo.
-4. O padrão de qualquer pergunta de anexo é **não**. Um assistente que facilita
-   ligar tudo é pior que nenhum.
 
 ---
 

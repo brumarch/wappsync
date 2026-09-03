@@ -144,6 +144,9 @@ host_id = "bruno-win"      # nome curto e estável desta máquina
 path = 'G:/Meu Drive/wapp' # pasta que o app do Drive já sincroniza
 ```
 
+Quais conversas saem e quais anexos são baixados você escolhe no passo 3, num
+questionário — não precisa editar `[filter]` e `[media]` à mão.
+
 ### 2. Parear esta máquina
 
 ```bash
@@ -164,7 +167,25 @@ Para puxar ~1 ano de histórico em vez das últimas semanas:
 ./wappsync login -full-history
 ```
 
-### 3. Deixar rodando
+### 3. Escolher o que sai
+
+```bash
+./wappsync setup
+```
+
+Lista os grupos e as conversas com mensagem e pergunta: exporta todas? transcreve
+áudio? baixa imagem, documento, áudio de todas? Depois de cada "sim", você marca
+por número as conversas que ficam de fora. O padrão de toda pergunta de anexo é
+**não** — só apertar Enter produz um config que exporta texto e não baixa nada.
+
+Antes de gravar ele mostra o bloco que vai substituir (`[filter]`, `[media]` e
+`[transcribe]`; o resto do arquivo fica intacto), pede confirmação e deixa uma
+cópia em `config.toml.bak`. Grava JID em vez de nome, com o nome em comentário:
+nome muda, JID não. Pode rodar de novo quando quiser — **com o `run` parado**:
+como o `groups`, o `setup` abre a mesma sessão, e o WhatsApp derruba a conexão
+anterior (o `run` sairia com código 3, achando que foi desvinculado).
+
+### 4. Deixar rodando
 
 ```bash
 ./wappsync run
@@ -184,7 +205,7 @@ Restart=always
 RestartPreventExitStatus=3
 ```
 
-### 4. Conferir
+### 5. Conferir
 
 ```bash
 ./wappsync status
@@ -372,6 +393,8 @@ kinds = ["audio"]
 
 Os dois se combinam: `kinds = ["audio"]` mais `[[media.chat]]` com
 `kinds = ["image"]` para a Família baixa áudio de todos e imagem só dela.
+
+Tudo isso o `wappsync setup` escreve por você, num questionário (ver Uso).
 
 **Confira o que a configuração realmente faz** antes de esperar resultado. O
 `wappsync groups` mostra a política já resolvida por conversa:
