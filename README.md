@@ -1,5 +1,7 @@
 # wappsync
 
+[![CI](https://github.com/brumarch/wappsync/actions/workflows/ci.yml/badge.svg)](https://github.com/brumarch/wappsync/actions/workflows/ci.yml)
+
 Ponte entre o seu WhatsApp e uma pasta privada em nuvem, para que agentes de IA
 (Hermes, OpenClaw, Claude, …) leiam e resumam suas conversas **sem receber acesso
 à sua conta**.
@@ -114,15 +116,9 @@ o driver SQLite é puro Go.
 git clone https://github.com/brumarch/wappsync && cd wappsync && go build ./cmd/wappsync
 ```
 
-Repita em cada máquina, ou compile cruzado a partir de uma só:
-
-```bash
-GOOS=windows GOARCH=amd64 go build -o wappsync.exe ./cmd/wappsync
-```
-
-```bash
-GOOS=darwin GOARCH=arm64 go build -o wappsync-mac ./cmd/wappsync
-```
+O passo a passo completo por sistema — dependências, Whisper para transcrição,
+compilação cruzada e como deixar rodando como serviço no **Windows, macOS,
+Linux e WSL** — está em [docs/INSTALACAO.md](docs/INSTALACAO.md).
 
 ---
 
@@ -454,24 +450,12 @@ remote = "gdrive:wapp"        # ou "s3-privado:meu-bucket/wapp"
 
 ## Rodar como serviço
 
-**Windows** (Agendador de Tarefas, ao logon):
-
-```powershell
-schtasks /create /tn wappsync /tr "C:\caminho\wappsync.exe run -config C:\caminho\config.toml" /sc onlogon /rl limited
-```
-
-**macOS** (LaunchAgent em `~/Library/LaunchAgents/com.wappsync.plist`, com
-`RunAtLoad` e `KeepAlive`), ou simplesmente:
-
-```bash
-nohup ./wappsync run > ~/wappsync.log 2>&1 &
-```
-
-**Linux/WSL** (systemd user unit):
-
-```bash
-systemctl --user enable --now wappsync
-```
+Agendador de Tarefas no Windows, LaunchAgent no macOS, unit de usuário do
+systemd no Linux e no WSL — os arquivos prontos para copiar estão em
+[docs/INSTALACAO.md](docs/INSTALACAO.md), cada um na seção do seu sistema. O
+único detalhe que importa em todos: quando o WhatsApp desvincula a máquina o
+`run` sai com **código 3**, e o supervisor não deve reiniciar nesse caso
+(`RestartPreventExitStatus=3` no systemd).
 
 ---
 
