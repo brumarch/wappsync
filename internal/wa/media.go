@@ -220,7 +220,7 @@ func (c *Client) mediaJobFor(m msgstore.Message, msg *waE2E.Message, chatName st
 		// Em INFO, e não em silêncio: "configurei e não baixou nada" é
 		// indistinguível de "está funcionando" sem esta linha. Vai com nome E
 		// JID porque nome vazio aqui é o sintoma que aponta a causa.
-		c.log.Infof("anexo (%s) de %q [%s] não baixado: nenhuma entrada [[media.chat]] casa com este chat e este tipo",
+		c.log.Infof("anexo (%s) de %q [%s] não baixado: a política de [media] não cobre este chat e este tipo (kinds, [[media.chat]] ou [[media.exclude]])",
 			att.Kind, chatName, m.ChatJID)
 		return mediaJob{}, false
 	}

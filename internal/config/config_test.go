@@ -374,6 +374,64 @@ func TestMediaAllowed(t *testing.T) {
 			filter: Filter{IncludeOnly: []string{"Família"}},
 			jid:    "x@g.us", chat: "Trabalho", kind: "image", want: false,
 		},
+		{
+			// [media].kinds vale para todo chat exportado, sem precisar de
+			// [[media.chat]] — é o "baixa de todos" pedido por extenso.
+			name:  "[media].kinds cobre chat que não está em nenhuma entrada",
+			media: Media{Enabled: true, Kinds: []string{"audio", "document"}},
+			jid:   "x@g.us", chat: "Trabalho", kind: "audio", want: true,
+		},
+		{
+			name:  "[media].kinds não cobre tipo que não lista",
+			media: Media{Enabled: true, Kinds: []string{"document"}},
+			jid:   "x@g.us", chat: "Trabalho", kind: "image", want: false,
+		},
+		{
+			name: "exclude tira o tipo de um chat coberto por [media].kinds",
+			media: Media{Enabled: true, Kinds: []string{"audio", "document"}, Exclude: []MediaChat{
+				{Match: "Financeiro", Kinds: []string{"audio"}},
+			}},
+			jid: "x@g.us", chat: "Financeiro", kind: "audio", want: false,
+		},
+		{
+			// A exceção é por tipo: tirar o áudio do Financeiro não tira o
+			// documento. Senão "exclude" viraria um segundo [filter].exclude.
+			name: "exclude só tira o tipo que lista",
+			media: Media{Enabled: true, Kinds: []string{"audio", "document"}, Exclude: []MediaChat{
+				{Match: "Financeiro", Kinds: []string{"audio"}},
+			}},
+			jid: "x@g.us", chat: "Financeiro", kind: "document", want: true,
+		},
+		{
+			// Como o exclude de [filter] sobre include_only: a exceção ganha
+			// de qualquer permissão, inclusive da explícita por chat. Se
+			// [[media.chat]] ganhasse, a resposta dependeria de qual bloco o
+			// usuário escreveu — e a ordem no arquivo viraria semântica.
+			name: "exclude prevalece sobre [[media.chat]]",
+			media: Media{Enabled: true,
+				Chats:   []MediaChat{{Match: "Família", Kinds: []string{"image"}}},
+				Exclude: []MediaChat{{Match: famJID, Kinds: []string{"image"}}},
+			},
+			jid: famJID, chat: "Família", kind: "image", want: false,
+		},
+		{
+			name: "exclude de outro chat não afeta este",
+			media: Media{Enabled: true, Kinds: []string{"audio"}, Exclude: []MediaChat{
+				{Match: "Financeiro", Kinds: []string{"audio"}},
+			}},
+			jid: famJID, chat: "Família", kind: "audio", want: true,
+		},
+		{
+			name:   "[media].kinds não passa por cima do [filter]",
+			media:  Media{Enabled: true, Kinds: []string{"audio"}},
+			filter: Filter{Exclude: []string{"Família"}},
+			jid:    famJID, chat: "Família", kind: "audio", want: false,
+		},
+		{
+			name:  "[media].kinds com a trava mestra desligada não baixa",
+			media: Media{Enabled: false, Kinds: []string{"audio", "document", "image"}},
+			jid:   famJID, chat: "Família", kind: "document", want: false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -399,6 +457,11 @@ func TestMediaDefaultIsDownloadNothing(t *testing.T) {
 	}
 	if cfg.Media.MaxFileMB != 20 {
 		t.Errorf("max_file_mb = %d, queria 20", cfg.Media.MaxFileMB)
+	}
+	// "Baixa de todos" existe, mas só quando escrito por extenso: um default
+	// aqui faria [media].enabled = true sozinho publicar anexo de toda conversa.
+	if len(cfg.Media.Kinds) != 0 {
+		t.Errorf("[media].kinds deveria vir vazio, veio %v", cfg.Media.Kinds)
 	}
 	for _, kind := range MediaKinds() {
 		for _, chat := range []struct{ jid, name string }{
@@ -442,6 +505,10 @@ func TestMediaChatValidation(t *testing.T) {
 	cases := []struct{ name, body, want string }{
 		{"match vazio", "[[media.chat]]\nmatch = \"\"\nkinds = [\"image\"]\n", "match vazio"},
 		{"kinds vazio", "[[media.chat]]\nmatch = \"Família\"\nkinds = []\n", "kinds vazio"},
+		{"exclude com match vazio", "[[media.exclude]]\nmatch = \"\"\nkinds = [\"image\"]\n", "media.exclude[0]: match vazio"},
+		{"exclude com kinds vazio", "[[media.exclude]]\nmatch = \"Família\"\nkinds = []\n", "media.exclude[0] (\"Família\"): kinds vazio"},
+		{"exclude com kind desconhecido", "[[media.exclude]]\nmatch = \"Família\"\nkinds = [\"imagem\"]\n", "kind desconhecido \"imagem\""},
+		{"[media].kinds com kind desconhecido", "kinds = [\"documento\"]\n", "media.kinds: kind desconhecido \"documento\""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -481,6 +548,45 @@ func TestAudioKindRequiresTranscription(t *testing.T) {
 		"[remote]\nbackend = \"none\"\n"
 	if _, err := Load(write(t, comTranscricao)); err != nil {
 		t.Errorf("configuração válida foi recusada: %v", err)
+	}
+}
+
+// Trava. [media].kinds = ["audio"] manda baixar de todo chat, então está
+// sujeito à mesma exigência de [[media.chat]]: sem transcrição não produz nada.
+func TestMediaKindsAudioRequiresTranscription(t *testing.T) {
+	_, err := Load(write(t, "host_id = \"m\"\n[media]\nenabled = true\nkinds = [\"audio\"]\n"+
+		"[remote]\nbackend = \"none\"\n"))
+	if err == nil {
+		t.Fatal("[media].kinds = [\"audio\"] foi aceito sem [transcribe].enabled")
+	}
+	if !strings.Contains(err.Error(), "media.kinds") || !strings.Contains(err.Error(), "transcribe") {
+		t.Errorf("a mensagem não liga uma coisa à outra: %v", err)
+	}
+}
+
+// Uma exceção sem efeito não engana ninguém: excluir áudio com a transcrição
+// desligada precisa carregar, senão desligar a transcrição por um tempo
+// obrigaria a editar também a lista de exceções.
+func TestMediaExcludeAudioWithoutTranscriptionLoads(t *testing.T) {
+	cfg, err := Load(write(t, "host_id = \"m\"\n[media]\nenabled = true\nkinds = [\"document\"]\n"+
+		"[[media.exclude]]\nmatch = \"Financeiro\"\nkinds = [\"audio\", \"document\"]\n"+
+		"[remote]\nbackend = \"none\"\n"))
+	if err != nil {
+		t.Fatalf("configuração válida foi recusada: %v", err)
+	}
+	// E o TOML chegou inteiro onde devia — a chave "kinds" existe em três
+	// lugares, então vale conferir que cada uma caiu no campo certo.
+	if got := cfg.Media.Kinds; len(got) != 1 || got[0] != "document" {
+		t.Errorf("[media].kinds = %v, queria [document]", got)
+	}
+	if len(cfg.Media.Exclude) != 1 || cfg.Media.Exclude[0].Match != "Financeiro" || len(cfg.Media.Exclude[0].Kinds) != 2 {
+		t.Errorf("[[media.exclude]] = %+v", cfg.Media.Exclude)
+	}
+	if cfg.MediaAllowed("x@g.us", "Financeiro", "document") {
+		t.Error("documento do Financeiro deveria ficar de fora")
+	}
+	if !cfg.MediaAllowed("x@g.us", "Trabalho", "document") {
+		t.Error("documento do Trabalho deveria baixar")
 	}
 }
 

@@ -48,13 +48,22 @@ type MediaChat struct {
 
 // Media é a política de download de anexos.
 //
-// O default é não baixar nada: Enabled desligado, e nenhum chat listado. A
-// ausência de uma entrada significa "não baixa", nunca "baixa tudo" — é o que
-// mantém o custo de um erro de digitação em zero mensagem vazada.
+// O default é não baixar nada: Enabled desligado, Kinds vazio e nenhum chat
+// listado. A ausência de configuração significa "não baixa", nunca "baixa
+// tudo" — é o que mantém o custo de um erro de digitação em zero mensagem
+// vazada. Baixar de todos os chats é uma decisão que o usuário escreve por
+// extenso em Kinds.
+//
+// A forma espelha [filter]: um padrão amplo (Kinds vale para todo chat
+// exportado), acréscimos por chat (Chats) e exceções que prevalecem sobre
+// ambos (Exclude). Quem já aprendeu include_only/exclude não precisa aprender
+// uma segunda regra de precedência.
 type Media struct {
 	Enabled   bool        `toml:"enabled"`
 	MaxFileMB int         `toml:"max_file_mb"`
+	Kinds     []string    `toml:"kinds"`
 	Chats     []MediaChat `toml:"chat"`
+	Exclude   []MediaChat `toml:"exclude"`
 }
 
 // Transcribe configura a transcrição local de áudio.
@@ -278,6 +287,9 @@ func (c *Config) finalize() error {
 			return fmt.Errorf("transcribe.model não está acessível em %s: %w", c.Transcribe.Model, err)
 		}
 	}
+	if err := c.validateMediaKinds("media.kinds", c.Media.Kinds, true); err != nil {
+		return err
+	}
 	for i, mc := range c.Media.Chats {
 		if strings.TrimSpace(mc.Match) == "" {
 			return fmt.Errorf("media.chat[%d]: match vazio", i)
@@ -285,21 +297,50 @@ func (c *Config) finalize() error {
 		if len(mc.Kinds) == 0 {
 			return fmt.Errorf("media.chat[%d] (%q): kinds vazio; remova a entrada se não quer baixar nada", i, mc.Match)
 		}
-		// Um kind desconhecido é erro, não algo a ignorar. Este arquivo é
-		// escrito em pt-BR o tempo todo, e kinds = ["imagem"] simplesmente
-		// nunca casaria — o usuário concluiria que o download não funciona.
-		for _, k := range mc.Kinds {
-			if !MediaKindKnown(k) {
-				return fmt.Errorf("media.chat[%d] (%q): kind desconhecido %q (use %s)",
-					i, mc.Match, k, strings.Join(MediaKinds(), " ou "))
-			}
-			// Áudio sem transcrição não produz nada: o arquivo bruto não é
-			// publicado (um .ogg na nuvem é peso sem leitor), então a linha
-			// ficaria escrita no config sem qualquer efeito.
-			if k == KindAudio && !c.Transcribe.Enabled {
-				return fmt.Errorf(`media.chat[%d] (%q) pede kind "audio", mas [transcribe].enabled está desligado; `+
-					"sem transcrição o áudio não vira nada — ligue a transcrição ou remova o kind", i, mc.Match)
-			}
+		where := fmt.Sprintf("media.chat[%d] (%q)", i, mc.Match)
+		if err := c.validateMediaKinds(where, mc.Kinds, true); err != nil {
+			return err
+		}
+	}
+	for i, mc := range c.Media.Exclude {
+		if strings.TrimSpace(mc.Match) == "" {
+			return fmt.Errorf("media.exclude[%d]: match vazio", i)
+		}
+		if len(mc.Kinds) == 0 {
+			return fmt.Errorf("media.exclude[%d] (%q): kinds vazio; diga quais tipos ficam de fora, ou remova a entrada", i, mc.Match)
+		}
+		// Excluir áudio com a transcrição desligada é inofensivo — a exceção
+		// só deixa de ter efeito. Exigir o mesmo pareamento aqui obrigaria a
+		// editar a lista de exceções toda vez que a transcrição fosse
+		// desligada por um tempo.
+		where := fmt.Sprintf("media.exclude[%d] (%q)", i, mc.Match)
+		if err := c.validateMediaKinds(where, mc.Kinds, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateMediaKinds recusa kind desconhecido e, quando produces é verdadeiro,
+// "audio" sem transcrição.
+//
+// Um kind desconhecido é erro, não algo a ignorar. Este arquivo é escrito em
+// pt-BR o tempo todo, e kinds = ["imagem"] simplesmente nunca casaria — o
+// usuário concluiria que o download não funciona.
+//
+// Áudio sem transcrição não produz nada: o arquivo bruto não é publicado (um
+// .ogg na nuvem é peso sem leitor), então a linha ficaria escrita no config
+// sem qualquer efeito. Isso só vale para linhas que MANDAM baixar; uma exceção
+// sem efeito não engana ninguém.
+func (c *Config) validateMediaKinds(where string, kinds []string, produces bool) error {
+	for _, k := range kinds {
+		if !MediaKindKnown(k) {
+			return fmt.Errorf("%s: kind desconhecido %q (use %s)",
+				where, k, strings.Join(MediaKinds(), " ou "))
+		}
+		if produces && k == KindAudio && !c.Transcribe.Enabled {
+			return fmt.Errorf(`%s pede kind "audio", mas [transcribe].enabled está desligado; `+
+				"sem transcrição o áudio não vira nada — ligue a transcrição ou remova o kind", where)
 		}
 	}
 	return nil
@@ -400,7 +441,8 @@ const KindAudio = "audio"
 // MediaKinds devolve os tipos de anexo suportados.
 func MediaKinds() []string { return append([]string(nil), mediaKinds...) }
 
-// MediaKindKnown informa se um valor de media.chat.kinds é suportado.
+// MediaKindKnown informa se um valor de kinds (em [media], [[media.chat]] ou
+// [[media.exclude]]) é suportado.
 func MediaKindKnown(kind string) bool {
 	for _, k := range mediaKinds {
 		if k == kind {
@@ -412,22 +454,39 @@ func MediaKindKnown(kind string) bool {
 
 // MediaAllowed decide se o anexo de uma mensagem pode ser baixado.
 //
-// São três condições, e todas as três precisam valer:
+// São quatro condições, e todas precisam valer:
 //
 //  1. a trava mestra [media].enabled está ligada;
 //  2. o chat sai daqui de qualquer forma (ChatAllowed) — baixar mídia de uma
 //     conversa que nem é exportada seria trazer para o disco um dado que o
 //     usuário mandou não publicar;
-//  3. alguma entrada [[media.chat]] casa com o chat E lista este kind.
+//  3. nenhuma entrada [[media.exclude]] casa com o chat E lista este kind;
+//  4. o kind está em [media].kinds (vale para todo chat exportado) OU alguma
+//     entrada [[media.chat]] casa com o chat E lista este kind.
 //
-// Chat não listado significa "não baixa". A permissão é sempre aditiva: nunca
-// existe uma entrada que TIRE permissão, então a ordem das entradas no arquivo
-// não é carga semântica e duas regras que casam com o mesmo chat se somam.
+// Nada configurado significa "não baixa". A exceção prevalece sobre o resto,
+// como o exclude de [filter] prevalece sobre include_only: assim a ordem das
+// entradas no arquivo não é carga semântica — mover um bloco de lugar nunca
+// muda o que sai da máquina — e duas regras que casam com o mesmo chat se
+// somam, sem uma anular a outra.
 func (c *Config) MediaAllowed(jid, name, kind string) bool {
 	if !c.Media.Enabled || !c.ChatAllowed(jid, name) {
 		return false
 	}
-	for _, mc := range c.Media.Chats {
+	if listsKind(c.Media.Exclude, jid, name, kind) {
+		return false
+	}
+	for _, k := range c.Media.Kinds {
+		if k == kind {
+			return true
+		}
+	}
+	return listsKind(c.Media.Chats, jid, name, kind)
+}
+
+// listsKind informa se alguma entrada casa com o chat e lista o kind.
+func listsKind(entries []MediaChat, jid, name, kind string) bool {
+	for _, mc := range entries {
 		if !matches(mc.Match, jid, name) {
 			continue
 		}

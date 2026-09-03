@@ -522,7 +522,7 @@ func cmdGroups(ctx context.Context, cfg *config.Config, verbose bool) error {
 			g.Name, g.ParticipantCount, g.JID.String(), describeMediaPolicy(cfg, g.JID.String(), g.Name))
 	}
 	fmt.Println("\nUse os nomes (ou JIDs) em [filter].include_only / [filter].exclude no config.toml")
-	fmt.Println("A coluna \"anexos\" mostra a política de [[media.chat]] JÁ RESOLVIDA para cada")
+	fmt.Println("A coluna \"anexos\" mostra a política de [media] JÁ RESOLVIDA para cada")
 	fmt.Println("conversa: é o que este binário faria hoje, não o que o TOML parece dizer.")
 	return nil
 }

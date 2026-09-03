@@ -61,8 +61,9 @@ entradas, todas leitura, conexão ou pareamento. Nada alcança a conta sem passa
 por ali.
 
 A única que busca conteúdo em vez de receber o que foi empurrado é `Download`,
-que baixa anexo. Ela depende de você ligar `[media]` no config e listar o chat:
-sem isso não é chamada nenhuma vez. Continua sendo leitura — não notifica o
+que baixa anexo. Ela depende de você ligar `[media]` no config e dizer o que
+baixar (`kinds` para todos os chats, ou `[[media.chat]]` por chat): sem isso
+não é chamada nenhuma vez. Continua sendo leitura — não notifica o
 remetente, não marca como lido, não emite recibo.
 
 **Denylist de API.** `TestNoWriteAPIAnywhere` falha se `SendMessage`, `MarkRead`,
@@ -213,8 +214,8 @@ Por padrão, mídia **não é baixada**: uma foto vira `[imagem] legenda`, um á
 vira `[áudio (voz) 34s]`. É o que interessa para um resumo, sem gigabytes na
 nuvem.
 
-Se você ligar `[media]` (ver Configuração), as imagens e os documentos **dos
-chats que você listar** passam a ser baixados e publicados em
+Se você ligar `[media]` (ver Configuração), os anexos **dos chats e tipos que
+você cobrir** passam a ser baixados e publicados em
 `media/<host_id>/<sha256>.<ext>`, e o registro ganha um ponteiro:
 
 ```json
@@ -319,15 +320,42 @@ Tudo em `config.toml`, sem recompilar. Os campos que você provavelmente vai mex
 | `export.include_status_broadcast` | `false` | Status/stories. Costuma ser ruído. |
 | `media.enabled` | `false` | Trava mestra dos anexos. Desligada, nada é baixado. |
 | `media.max_file_mb` | `20` | Acima disso o anexo é ignorado e fica só o marcador. |
-| `[[media.chat]]` | — | Por chat: `match` (nome ou JID) e `kinds` (`image`, `document`, `audio`). Chat que não está aqui não baixa nada. |
+| `media.kinds` | `[]` | Tipos baixados de **todo** chat exportado (`image`, `document`, `audio`). Vazio: só o que `[[media.chat]]` listar. |
+| `[[media.exclude]]` | — | Exceções por chat: `match` (nome ou JID) e `kinds`. Prevalece sobre `media.kinds` e sobre `[[media.chat]]`. |
+| `[[media.chat]]` | — | Acréscimos por chat: `match` e `kinds`. Cobre o que `media.kinds` não cobre (ex.: imagem só de um grupo). |
 | `transcribe.enabled` | `false` | Transcreve áudio nesta máquina. Exigido por `kinds = ["audio"]`. |
 | `transcribe.model` | — | Caminho do `ggml-*.bin`. Obrigatório com `enabled = true`. |
 | `transcribe.language` | `"auto"` | `"pt"`, `"en"`… Cravar o idioma errado produz transcrição errada com cara de certa. |
 | `transcribe.max_seconds` | `600` | Áudio mais longo nem é baixado. |
 
 Baixar anexo muda o que sai da máquina: sem `[media]`, só texto vai para a nuvem.
-Por isso a permissão é por conversa e aditiva — nunca existe uma regra que tire
-permissão, e chat ausente significa "não baixa".
+Por isso nada configurado significa "não baixa" — e "baixar de todos" é algo
+que você escreve por extenso em `kinds`. A precedência é a mesma de `[filter]`:
+`exclude` ganha de tudo, então a ordem dos blocos no arquivo não muda o
+resultado.
+
+Dois jeitos de usar. Por padrão amplo com exceções — áudio e documento de toda
+conversa, menos as que você tirar:
+
+```toml
+[media]
+enabled = true
+kinds = ["audio", "document"]
+
+[[media.exclude]]
+match = "Financeiro"
+kinds = ["audio", "document"]
+
+[[media.exclude]]
+match = "5511999999999@s.whatsapp.net"
+kinds = ["audio"]
+
+[transcribe]
+enabled = true
+model = '/opt/whisper/ggml-small.bin'
+```
+
+Ou por allowlist, deixando `kinds` vazio e listando conversa a conversa:
 
 ```toml
 [media]
@@ -340,11 +368,10 @@ kinds = ["image", "document"]
 [[media.chat]]
 match = "Squad Backend"
 kinds = ["audio"]
-
-[transcribe]
-enabled = true
-model = '/opt/whisper/ggml-small.bin'
 ```
+
+Os dois se combinam: `kinds = ["audio"]` mais `[[media.chat]]` com
+`kinds = ["image"]` para a Família baixa áudio de todos e imagem só dela.
 
 **Confira o que a configuração realmente faz** antes de esperar resultado. O
 `wappsync groups` mostra a política já resolvida por conversa:
@@ -556,8 +583,9 @@ anexos publicados junto com elas também.
 
 **Anexo aumenta o que o provedor consegue ler.** Sem `[media]`, o que está na
 nuvem é texto. Com `[media]`, são as fotos e os documentos das conversas que você
-listou. É a mudança de exposição mais significativa do projeto: pense por
-conversa, não por conveniência.
+cobriu — e `kinds` cobre todas de uma vez. É a mudança de exposição mais
+significativa do projeto: pense por conversa, não por conveniência, e use
+`[[media.exclude]]` para as que não devem sair.
 
 **Transcrição é local, mas o texto não.** O áudio nunca sai da máquina e é
 apagado depois de transcrito — nenhum serviço externo é chamado. Mas o texto do

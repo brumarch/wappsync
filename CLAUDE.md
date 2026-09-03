@@ -29,9 +29,10 @@ então o padrão está em uso e o buraco seria real.
   receipt* pedindo reenvio.
 
 `c.wa.Download` é a única entrada da allowlist que vai *buscar* conteúdo, e é
-gatilhada por config: sem `[media].enabled` e sem um `[[media.chat]]` casando
-com a conversa, nunca é chamada. Continua leitura — não notifica, não marca como
-lido, não emite recibo.
+gatilhada por config: sem `[media].enabled` e sem `[media].kinds` ou um
+`[[media.chat]]` cobrindo a conversa, nunca é chamada. `[[media.exclude]]`
+prevalece sobre os dois, como o `exclude` de `[filter]`. Continua leitura — não
+notifica, não marca como lido, não emite recibo.
 
 **Se `TestClientCallsAreAllowlisted` falhar, a pergunta certa não é "como faço
 passar".** É: por que apareceu uma chamada nova ao cliente do WhatsApp? Adicionar
