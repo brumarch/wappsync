@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/bmar13/wappsync/internal/export"
-	"github.com/bmar13/wappsync/internal/transcribe"
+	"github.com/brumarch/wappsync/internal/export"
+	"github.com/brumarch/wappsync/internal/transcribe"
 )
 
 // transcribeJob é um áudio já baixado, esperando o Whisper.

@@ -1,4 +1,4 @@
-module github.com/bmar13/wappsync
+module github.com/brumarch/wappsync
 
 go 1.26.0
 

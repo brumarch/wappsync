@@ -12,9 +12,9 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 
-	"github.com/bmar13/wappsync/internal/config"
-	"github.com/bmar13/wappsync/internal/export"
-	msgstore "github.com/bmar13/wappsync/internal/store"
+	"github.com/brumarch/wappsync/internal/config"
+	"github.com/brumarch/wappsync/internal/export"
+	msgstore "github.com/brumarch/wappsync/internal/store"
 )
 
 // attachment descreve um anexo que este binário sabe baixar e publicar.

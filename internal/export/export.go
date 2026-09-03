@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bmar13/wappsync/internal/config"
-	"github.com/bmar13/wappsync/internal/store"
+	"github.com/brumarch/wappsync/internal/config"
+	"github.com/brumarch/wappsync/internal/store"
 )
 
 // SchemaVersion identifica o formato dos artefatos publicados.

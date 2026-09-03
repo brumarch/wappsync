@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bmar13/wappsync/internal/store"
+	"github.com/brumarch/wappsync/internal/store"
 )
 
 // rankedSchema é o SchemaVersion vigente quando a tabela abaixo foi conferida à

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bmar13/wappsync/internal/config"
-	"github.com/bmar13/wappsync/internal/export"
+	"github.com/brumarch/wappsync/internal/config"
+	"github.com/brumarch/wappsync/internal/export"
 )
 
 // O código de saída é o que um supervisor enxerga. Confundir "o pareamento

@@ -24,9 +24,9 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 
-	"github.com/bmar13/wappsync/internal/config"
-	msgstore "github.com/bmar13/wappsync/internal/store"
-	"github.com/bmar13/wappsync/internal/transcribe"
+	"github.com/brumarch/wappsync/internal/config"
+	msgstore "github.com/brumarch/wappsync/internal/store"
+	"github.com/brumarch/wappsync/internal/transcribe"
 )
 
 type Client struct {

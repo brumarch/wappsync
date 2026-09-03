@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bmar13/wappsync/internal/config"
-	"github.com/bmar13/wappsync/internal/store"
+	"github.com/brumarch/wappsync/internal/config"
+	"github.com/brumarch/wappsync/internal/store"
 )
 
 // -update regrava o arquivo golden. Use quando a MUDANÇA de formato for

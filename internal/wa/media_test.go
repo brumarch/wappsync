@@ -11,9 +11,9 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/bmar13/wappsync/internal/config"
-	"github.com/bmar13/wappsync/internal/export"
-	msgstore "github.com/bmar13/wappsync/internal/store"
+	"github.com/brumarch/wappsync/internal/config"
+	"github.com/brumarch/wappsync/internal/export"
+	msgstore "github.com/brumarch/wappsync/internal/store"
 )
 
 // A decisão de baixar é função pura do config, do nome do chat e do protobuf.

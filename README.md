@@ -111,7 +111,7 @@ Requer **Go 1.26+** ([go.dev/dl](https://go.dev/dl/)). Não precisa de compilado
 o driver SQLite é puro Go.
 
 ```bash
-git clone https://github.com/bmar13/wappsync && cd wappsync && go build ./cmd/wappsync
+git clone https://github.com/brumarch/wappsync && cd wappsync && go build ./cmd/wappsync
 ```
 
 Repita em cada máquina, ou compile cruzado a partir de uma só:

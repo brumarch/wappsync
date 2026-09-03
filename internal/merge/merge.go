@@ -26,9 +26,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bmar13/wappsync/internal/config"
-	"github.com/bmar13/wappsync/internal/export"
-	"github.com/bmar13/wappsync/internal/remote"
+	"github.com/brumarch/wappsync/internal/config"
+	"github.com/brumarch/wappsync/internal/export"
+	"github.com/brumarch/wappsync/internal/remote"
 )
 
 const (

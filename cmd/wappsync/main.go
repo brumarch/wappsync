@@ -16,12 +16,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bmar13/wappsync/internal/config"
-	"github.com/bmar13/wappsync/internal/export"
-	"github.com/bmar13/wappsync/internal/merge"
-	"github.com/bmar13/wappsync/internal/remote"
-	"github.com/bmar13/wappsync/internal/store"
-	"github.com/bmar13/wappsync/internal/wa"
+	"github.com/brumarch/wappsync/internal/config"
+	"github.com/brumarch/wappsync/internal/export"
+	"github.com/brumarch/wappsync/internal/merge"
+	"github.com/brumarch/wappsync/internal/remote"
+	"github.com/brumarch/wappsync/internal/store"
+	"github.com/brumarch/wappsync/internal/wa"
 )
 
 const usage = `wappsync — ponte entre o seu WhatsApp e uma pasta privada em nuvem.
