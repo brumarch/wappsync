@@ -16,12 +16,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
-	"github.com/bmar13/wapp-summarizer/internal/export"
-	"github.com/bmar13/wapp-summarizer/internal/merge"
-	"github.com/bmar13/wapp-summarizer/internal/remote"
-	"github.com/bmar13/wapp-summarizer/internal/store"
-	"github.com/bmar13/wapp-summarizer/internal/wa"
+	"github.com/bmar13/wappsync/internal/config"
+	"github.com/bmar13/wappsync/internal/export"
+	"github.com/bmar13/wappsync/internal/merge"
+	"github.com/bmar13/wappsync/internal/remote"
+	"github.com/bmar13/wappsync/internal/store"
+	"github.com/bmar13/wappsync/internal/wa"
 )
 
 const usage = `wappsync — ponte entre o seu WhatsApp e uma pasta privada em nuvem.
@@ -42,7 +42,7 @@ Comandos:
   logout    Desvincula esta máquina da conta do WhatsApp.
 
 Flags globais:
-  -config <arquivo>   Padrão: ./config.toml, depois ~/.wapp-summarizer/config.toml
+  -config <arquivo>   Padrão: ./config.toml, depois ~/.wappsync/config.toml
   -v                  Log detalhado do whatsmeow
 `
 
@@ -157,7 +157,7 @@ func resolveConfigPath(explicit string) (string, error) {
 	}
 	home, err := os.UserHomeDir()
 	if err == nil {
-		fallback := filepath.Join(home, ".wapp-summarizer", "config.toml")
+		fallback := filepath.Join(home, ".wappsync", "config.toml")
 		if _, err := os.Stat(fallback); err == nil {
 			return fallback, nil
 		}

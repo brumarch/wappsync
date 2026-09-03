@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bmar13/wapp-summarizer/internal/store"
+	"github.com/bmar13/wappsync/internal/store"
 )
 
 // rankedSchema é o SchemaVersion vigente quando a tabela abaixo foi conferida à
@@ -16,7 +16,7 @@ import (
 // escolher a versão errada da mensagem, em silêncio. É por isso que mudar a
 // fórmula exige bumpar o schema: é a única coisa que faz uma máquina
 // desatualizada ser detectada em vez de ignorada.
-const rankedSchema = "wapp-summarizer/2"
+const rankedSchema = "wappsync/2"
 
 // TestRankFormulaIsPinnedToSchemaVersion trava a fórmula de precedência.
 //

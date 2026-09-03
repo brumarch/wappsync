@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
+	"github.com/bmar13/wappsync/internal/config"
 )
 
 // ErrNotExist é devolvido por Get quando o arquivo não existe no destino.

@@ -1,6 +1,6 @@
 ---
 name: proxima-fase
-description: Executa um item do backlog de PLANO-APRIMORAMENTOS.md do wapp-summarizer, do planejamento ao commit. Use quando o usuário pedir para avançar o backlog, rodar a próxima fase, ou executar um item por id (ex. "/proxima-fase B4").
+description: Executa um item do backlog de PLANO-APRIMORAMENTOS.md do wappsync, do planejamento ao commit. Use quando o usuário pedir para avançar o backlog, rodar a próxima fase, ou executar um item por id (ex. "/proxima-fase B4").
 ---
 
 # Próxima fase

@@ -1,4 +1,4 @@
-# wapp-summarizer
+# wappsync
 
 Captura o WhatsApp via [whatsmeow](https://github.com/tulir/whatsmeow) numa máquina
 pessoal e publica uma janela recente (padrão 3 dias) numa pasta privada em nuvem,

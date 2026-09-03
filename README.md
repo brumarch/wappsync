@@ -1,4 +1,4 @@
-# wapp-summarizer
+# wappsync
 
 Ponte entre o seu WhatsApp e uma pasta privada em nuvem, para que agentes de IA
 (Hermes, OpenClaw, Claude, …) leiam e resumam suas conversas **sem receber acesso
@@ -111,7 +111,7 @@ Requer **Go 1.26+** ([go.dev/dl](https://go.dev/dl/)). Não precisa de compilado
 o driver SQLite é puro Go.
 
 ```bash
-git clone https://github.com/bmar13/wapp-summarizer && cd wapp-summarizer && go build ./cmd/wappsync
+git clone https://github.com/bmar13/wappsync && cd wappsync && go build ./cmd/wappsync
 ```
 
 Repita em cada máquina, ou compile cruzado a partir de uma só:
@@ -215,7 +215,7 @@ RestartPreventExitStatus=3
 
 ## O que os agentes leem
 
-Aponte o agente para `<pasta>/wapp-summarizer/latest/`:
+Aponte o agente para `<pasta>/wappsync/latest/`:
 
 | Arquivo | Para quê |
 |---|---|

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
-	"github.com/bmar13/wapp-summarizer/internal/export"
-	"github.com/bmar13/wapp-summarizer/internal/store"
+	"github.com/bmar13/wappsync/internal/config"
+	"github.com/bmar13/wappsync/internal/export"
+	"github.com/bmar13/wappsync/internal/store"
 )
 
 // Teste de integração do ciclo real: config.toml em disco -> banco SQLite ->

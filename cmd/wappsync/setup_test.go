@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
-	"github.com/bmar13/wapp-summarizer/internal/store"
+	"github.com/bmar13/wappsync/internal/config"
+	"github.com/bmar13/wappsync/internal/store"
 )
 
 const (

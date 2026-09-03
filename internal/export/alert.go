@@ -53,7 +53,7 @@ func MarshalAlert(a Alert, loc *time.Location) []byte {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# ALERTA — a máquina `%s` parou de capturar\n\n", a.Host)
-	b.WriteString("Escrito pelo `wapp-summarizer` quando uma máquina perde o pareamento com o\n")
+	b.WriteString("Escrito pelo `wappsync` quando uma máquina perde o pareamento com o\n")
 	b.WriteString("WhatsApp. Enquanto este alerta valer, o histórico publicado tem um buraco:\n")
 	fmt.Fprintf(&b, "nada que chegou depois do horário abaixo foi capturado por `%s`.\n\n", a.Host)
 

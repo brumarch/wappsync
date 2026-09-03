@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
-	"github.com/bmar13/wapp-summarizer/internal/store"
+	"github.com/bmar13/wappsync/internal/config"
+	"github.com/bmar13/wappsync/internal/store"
 )
 
 // SchemaVersion identifica o formato dos artefatos publicados.
@@ -28,11 +28,11 @@ import (
 // O segundo caso é o mais traiçoeiro: prioridades calculadas por fórmulas
 // diferentes continuam sendo números comparáveis, então nada quebra — o merge
 // apenas passa a escolher a versão errada da mensagem, em silêncio.
-const SchemaVersion = "wapp-summarizer/2"
+const SchemaVersion = "wappsync/2"
 
 // legacySchema é o que assumimos para um shard publicado antes de o campo
 // Schema existir. Evita um flag day sem enfraquecer a checagem daqui em diante.
-const legacySchema = "wapp-summarizer/1"
+const legacySchema = "wappsync/1"
 
 // SchemaCompatible informa se um shard com este schema pode ser fundido com o
 // que este binário produz.

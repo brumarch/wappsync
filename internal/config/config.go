@@ -157,7 +157,7 @@ func defaults() Config {
 		},
 		Remote: Remote{
 			Backend: "folder",
-			Prefix:  "wapp-summarizer",
+			Prefix:  "wappsync",
 			Rclone:  RcloneRemote{Binary: "rclone"},
 		},
 		Merge: Merge{
@@ -212,7 +212,7 @@ func (c *Config) finalize() error {
 		if err != nil {
 			return fmt.Errorf("não consegui determinar o diretório home: %w", err)
 		}
-		c.Paths.DataDir = filepath.Join(home, ".wapp-summarizer")
+		c.Paths.DataDir = filepath.Join(home, ".wappsync")
 	}
 	c.Paths.DataDir = filepath.Clean(os.ExpandEnv(c.Paths.DataDir))
 

@@ -24,9 +24,9 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
-	msgstore "github.com/bmar13/wapp-summarizer/internal/store"
-	"github.com/bmar13/wapp-summarizer/internal/transcribe"
+	"github.com/bmar13/wappsync/internal/config"
+	msgstore "github.com/bmar13/wappsync/internal/store"
+	"github.com/bmar13/wappsync/internal/transcribe"
 )
 
 type Client struct {
@@ -70,7 +70,7 @@ func New(ctx context.Context, cfg *config.Config, db *msgstore.DB, verbose bool)
 
 	// Identifica-se como um navegador desktop comum. Ajuda a passar
 	// despercebido e deixa o dispositivo reconhecível na lista do celular.
-	store.DeviceProps.Os = strPtr("wapp-summarizer (" + cfg.HostID + ")")
+	store.DeviceProps.Os = strPtr("wappsync (" + cfg.HostID + ")")
 
 	dsn := "file:" + cfg.SessionDBPath() + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)"
 	container, err := sqlstore.New(ctx, "sqlite", dsn, dbLog)

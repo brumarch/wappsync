@@ -16,8 +16,8 @@ import (
 
 	waLog "go.mau.fi/whatsmeow/util/log"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
-	msgstore "github.com/bmar13/wapp-summarizer/internal/store"
+	"github.com/bmar13/wappsync/internal/config"
+	msgstore "github.com/bmar13/wappsync/internal/store"
 )
 
 // toStoreMessage e collectHistory não tocam em c.wa nem em c.db: dá para

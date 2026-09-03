@@ -12,10 +12,10 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
-	"github.com/bmar13/wapp-summarizer/internal/export"
-	msgstore "github.com/bmar13/wapp-summarizer/internal/store"
-	"github.com/bmar13/wapp-summarizer/internal/transcribe"
+	"github.com/bmar13/wappsync/internal/config"
+	"github.com/bmar13/wappsync/internal/export"
+	msgstore "github.com/bmar13/wappsync/internal/store"
+	"github.com/bmar13/wappsync/internal/transcribe"
 )
 
 func audioMsg(mime string, seconds uint32, length uint64, ptt bool) *waE2E.Message {

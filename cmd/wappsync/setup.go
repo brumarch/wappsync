@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
-	"github.com/bmar13/wapp-summarizer/internal/store"
-	"github.com/bmar13/wapp-summarizer/internal/wa"
+	"github.com/bmar13/wappsync/internal/config"
+	"github.com/bmar13/wappsync/internal/store"
+	"github.com/bmar13/wappsync/internal/wa"
 )
 
 // setupChat é uma conversa como o assistente a apresenta: o nome é para a

@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# wapp-summarizer — configuração
+# wappsync — configuração
 # Copie para config.toml e ajuste. Tudo aqui pode ser mudado sem recompilar.
 # ---------------------------------------------------------------------------
 
@@ -19,7 +19,7 @@ host_id = ""
 # Onde ficam a sessão do WhatsApp e o banco de mensagens.
 # ATENÇÃO: NÃO aponte para dentro da pasta sincronizada da nuvem.
 # A sessão é uma credencial e o SQLite corrompe sob sincronização.
-# Vazio = ~/.wapp-summarizer  (Windows: %USERPROFILE%\.wapp-summarizer)
+# Vazio = ~/.wappsync  (Windows: %USERPROFILE%\.wappsync)
 data_dir = ""
 
 [export]
@@ -145,7 +145,7 @@ max_seconds = 600
 backend = "folder"
 
 # Subpasta dentro do destino.
-prefix = "wapp-summarizer"
+prefix = "wappsync"
 
 [remote.folder]
 # Ex. Windows: 'G:/Meu Drive/wapp'

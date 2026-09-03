@@ -1,6 +1,6 @@
 # ALERTA — a máquina `bruno-win` parou de capturar
 
-Escrito pelo `wapp-summarizer` quando uma máquina perde o pareamento com o
+Escrito pelo `wappsync` quando uma máquina perde o pareamento com o
 WhatsApp. Enquanto este alerta valer, o histórico publicado tem um buraco:
 nada que chegou depois do horário abaixo foi capturado por `bruno-win`.
 

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
-	"github.com/bmar13/wapp-summarizer/internal/export"
-	"github.com/bmar13/wapp-summarizer/internal/remote"
+	"github.com/bmar13/wappsync/internal/config"
+	"github.com/bmar13/wappsync/internal/export"
+	"github.com/bmar13/wappsync/internal/remote"
 )
 
 // harness monta duas "máquinas" apontando para a mesma pasta de nuvem.
@@ -447,7 +447,7 @@ func TestConsolidateAbortsOnIncompatibleSchema(t *testing.T) {
 	}
 }
 
-// Shard sem o campo Schema é tratado como wapp-summarizer/1, e daí segue a
+// Shard sem o campo Schema é tratado como wappsync/1, e daí segue a
 // regra normal de compatibilidade.
 //
 // Enquanto o binário publicava /1, isso significava aceitar — era o ponto do

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/bmar13/wapp-summarizer/internal/config"
+	"github.com/bmar13/wappsync/internal/config"
 )
 
 // Este arquivo cobre apenas Delete, que é a operação destrutiva introduzida
