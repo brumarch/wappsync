@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/brumarch/wappsync/internal/config"
 )
@@ -98,5 +100,40 @@ func TestRcloneDeleteRefusesEscapingPaths(t *testing.T) {
 	r := &rclone{bin: "/bin/false", root: "gdrive:wapp"}
 	if err := r.Delete(context.Background(), "media/a/../../latest/index.json"); !errors.Is(err, ErrUnsafePath) {
 		t.Errorf("err = %v, queria ErrUnsafePath", err)
+	}
+}
+
+// rclone travado não pode segurar o ciclo de publicação para sempre.
+//
+// O script falso sobe um `sleep` em segundo plano, que herda o stdout: é o neto
+// que mantém o Wait preso depois de o filho ter sido morto pelo contexto. Sem
+// cmd.WaitDelay, run só volta quando o sleep termina — 30 segundos aqui, cinco
+// minutos de timeout mais o que o neto quiser em produção.
+func TestRcloneTimeoutIsNotHeldByGrandchild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("o rclone falso é um script de shell")
+	}
+	bin := filepath.Join(t.TempDir(), "rclone")
+	script := "#!/bin/sh\nsleep 30 &\nwait\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	be, err := New(&config.Config{Remote: config.Remote{
+		Backend: "rclone",
+		Rclone:  config.RcloneRemote{Binary: bin, Remote: "falso:pasta"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	inicio := time.Now()
+	if _, err := be.Get(ctx, "latest/index.json"); err == nil {
+		t.Fatal("Get devolveu sucesso de um rclone que nunca respondeu")
+	}
+	if d := time.Since(inicio); d > 10*time.Second {
+		t.Errorf("Get só voltou depois de %s: o neto segurou o Wait", d)
 	}
 }
