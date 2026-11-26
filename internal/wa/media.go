@@ -11,6 +11,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types/events"
 
 	"github.com/brumarch/wappsync/internal/config"
 	"github.com/brumarch/wappsync/internal/export"
@@ -109,6 +110,12 @@ func unwrapOnce(msg *waE2E.Message) *waE2E.Message {
 		msg.GetDocumentWithCaptionMessage(),
 		msg.GetGroupMentionedMessage(),
 		msg.GetLottieStickerMessage(),
+		// Os três abaixo entraram para acompanhar o UnwrapRaw do whatsmeow.
+		// No evento principal ele já os descasca; aqui cobrem a mensagem
+		// citada, que chega crua dentro do ContextInfo.
+		msg.GetSpoilerMessage(),
+		msg.GetAudioStickerMessage(),
+		msg.GetBotInvokeMessage(),
 	} {
 		if wrapped.GetMessage() != nil {
 			return wrapped.GetMessage()
@@ -125,6 +132,22 @@ func isViewOnce(msg *waE2E.Message) bool {
 	return msg.GetViewOnceMessage().GetMessage() != nil ||
 		msg.GetViewOnceMessageV2().GetMessage() != nil ||
 		msg.GetViewOnceMessageV2Extension().GetMessage() != nil
+}
+
+// attachmentOfEvent devolve o anexo baixável de um evento, se houver um.
+//
+// Existe porque a recusa de "ver uma vez" não pode olhar só para o protobuf: o
+// whatsmeow entrega evt.Message JÁ sem o invólucro (UnwrapRaw) e registra o
+// fato em evt.IsViewOnce. Durante um tempo a checagem foi feita só em
+// evt.Message, onde o invólucro nunca está — o teste montava a mensagem
+// embrulhada à mão e passava, e em produção o arquivo era baixado. Por isso
+// mediaJobFor recebe o evento, e não a mensagem: quem chama não tem como
+// entregar a versão desembrulhada sem a marca.
+func attachmentOfEvent(evt *events.Message) (attachment, bool) {
+	if evt == nil || evt.IsViewOnce {
+		return attachment{}, false
+	}
+	return attachmentOf(evt.Message)
 }
 
 // attachmentOf devolve o anexo baixável de uma mensagem, se houver um.
@@ -152,7 +175,9 @@ func attachmentAt(msg *waE2E.Message, depth int) (attachment, bool) {
 	case msg.GetImageMessage() != nil:
 		im := msg.GetImageMessage()
 		ext := extForMime(im.GetMimetype())
-		if ext == "" {
+		// O viewOnce da própria mídia é uma segunda marca, independente do
+		// invólucro: vale mesmo se a mensagem chegar aqui já descascada.
+		if ext == "" || im.GetViewOnce() {
 			return attachment{}, false
 		}
 		return attachment{Kind: "image", Ext: ext, Length: im.GetFileLength(), Source: im}, true
@@ -168,7 +193,7 @@ func attachmentAt(msg *waE2E.Message, depth int) (attachment, bool) {
 	case msg.GetAudioMessage() != nil:
 		am := msg.GetAudioMessage()
 		ext := audioExtForMime(am.GetMimetype())
-		if ext == "" {
+		if ext == "" || am.GetViewOnce() {
 			return attachment{}, false
 		}
 		return attachment{
@@ -201,18 +226,20 @@ type mediaJob struct {
 // mediaJobFor decide se a mensagem m tem um anexo que ESTA máquina deve baixar.
 //
 // É a função que concentra a decisão inteira, e é pura: dado o mesmo config, o
-// mesmo nome de chat e o mesmo protobuf, devolve sempre a mesma coisa. Quem
+// mesmo nome de chat e o mesmo evento, devolve sempre a mesma coisa. Quem
 // baixa é fetchMedia; aqui só se decide.
 //
 // chatName vem por parâmetro, e não de c.getName, porque resolvê-lo é I/O — e
 // era exatamente aí que morava um defeito silencioso: com o nome ainda vazio,
 // um `match = "Família"` não casava com nada e o anexo era pulado sem aviso.
 // Quem chama é responsável por resolver o melhor nome que tiver.
-func (c *Client) mediaJobFor(m msgstore.Message, msg *waE2E.Message, chatName string) (mediaJob, bool) {
+//
+// Recebe o evento inteiro, e não só evt.Message: ver attachmentOfEvent.
+func (c *Client) mediaJobFor(m msgstore.Message, evt *events.Message, chatName string) (mediaJob, bool) {
 	if !c.cfg.Media.Enabled || m.ID == "" || m.ChatJID == "" {
 		return mediaJob{}, false
 	}
-	att, ok := attachmentOf(msg)
+	att, ok := attachmentOfEvent(evt)
 	if !ok {
 		return mediaJob{}, false
 	}
@@ -262,23 +289,36 @@ func (c *Client) startMediaWorker() {
 	if !c.cfg.Media.Enabled {
 		return
 	}
-	c.mediaQ = make(chan mediaJob, 256)
+	// O worker lê de uma variável local: c.mediaQ volta a nil no encerramento,
+	// e é só por ela que os produtores sabem que a fila fechou.
+	q := make(chan mediaJob, 256)
+	c.mediaQ = q
 	c.mediaDone = make(chan struct{})
 	go func() {
 		defer close(c.mediaDone)
-		for job := range c.mediaQ {
+		for job := range q {
 			c.fetchMedia(job)
 		}
 	}()
 }
 
+// stopMediaWorker fecha a fila e espera o que já estava nela terminar.
+//
+// O campo vira nil ANTES do close, sob a trava de escrita: quando o close
+// acontece, nenhum queueMediaJob está no meio de um envio e nenhum outro vai
+// enxergar o canal. A espera fica fora da trava para que um download demorado
+// não segure o handler de eventos — ele só descarta o anexo e segue.
 func (c *Client) stopMediaWorker() {
-	if c.mediaQ == nil {
+	c.mediaMu.Lock()
+	q := c.mediaQ
+	c.mediaQ = nil
+	c.mediaMu.Unlock()
+
+	if q == nil {
 		return
 	}
-	close(c.mediaQ)
+	close(q)
 	<-c.mediaDone
-	c.mediaQ = nil
 }
 
 // queueMediaJob enfileira sem nunca bloquear quem chamou.
@@ -287,6 +327,8 @@ func (c *Client) stopMediaWorker() {
 // marcador continua lá, então o que se perde é o arquivo. Bloquear aqui
 // pararia a captura inteira, que é um estrago bem maior.
 func (c *Client) queueMediaJob(job mediaJob) {
+	c.mediaMu.RLock()
+	defer c.mediaMu.RUnlock()
 	if c.mediaQ == nil {
 		return
 	}

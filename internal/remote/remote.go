@@ -187,6 +187,12 @@ func (r *rclone) run(ctx context.Context, stdin []byte, args ...string) ([]byte,
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	// Sem isto o timeout não termina nada: CommandContext mata só o rclone, e
+	// um neto que tenha herdado o pipe (o rclone sobe processo auxiliar em
+	// alguns backends) mantém Wait bloqueado até ELE sair. O ciclo de
+	// publicação inteiro ficaria preso atrás de um único arquivo.
+	cmd.WaitDelay = 2 * time.Second
+
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if strings.Contains(msg, "directory not found") || strings.Contains(msg, "object not found") {
