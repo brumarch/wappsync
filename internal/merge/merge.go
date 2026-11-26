@@ -195,7 +195,14 @@ func PublishMedia(ctx context.Context, cfg *config.Config, be remote.Backend, lo
 	wanted := map[string]bool{}
 	data, err := be.Get(ctx, shardData(cfg.HostID))
 	if err == nil {
-		recs, _ := export.UnmarshalJSONL(data)
+		recs, skipped := export.UnmarshalJSONL(data)
+		if skipped > 0 {
+			// A lista de anexos a manter sai deste arquivo. Lido pela metade,
+			// ela viria incompleta — e a poda abaixo apagaria justamente os
+			// anexos das linhas que não deu para ler.
+			return res, fmt.Errorf("shard %s tem %d linha(s) corrompida(s); anexos não foram sincronizados",
+				shardData(cfg.HostID), skipped)
+		}
 		for _, r := range recs {
 			if name, ok := mediaNameFor(prefix, r.Media); ok {
 				wanted[name] = true

@@ -695,3 +695,52 @@ func TestPublishMediaKeepsRecentLocalFiles(t *testing.T) {
 		t.Errorf("arquivo antigo e sem referência continua no disco (err = %v)", err)
 	}
 }
+
+// Trava. A lista do que manter sai do shard publicado; se ele for lido pela
+// metade, os anexos das linhas ilegíveis pareceriam órfãos e seriam apagados —
+// no destino e, passado o prazo, no disco local. A poda é destrutiva: ou lê o
+// shard inteiro, ou não apaga nada.
+func TestPublishMediaRefusesCorruptedShard(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	local := filepath.Join(t.TempDir(), "media")
+
+	writeLocalMedia(t, local, "um.pdf", "1")
+	writeLocalMedia(t, local, "dois.pdf", "2")
+	if _, err := PublishShard(ctx, h.a, h.beA, []export.Record{
+		recMedia("A1", "g@g.us", export.MediaFile("maquina-a", "um.pdf"), h.now.Add(-2*time.Hour)),
+		recMedia("A2", "g@g.us", export.MediaFile("maquina-a", "dois.pdf"), h.now.Add(-time.Hour)),
+	}, "", h.from, h.now); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := PublishMedia(ctx, h.a, h.beA, local, h.from); err != nil || res.Uploaded != 2 {
+		t.Fatalf("preparação: res = %+v, err = %v", res, err)
+	}
+
+	// A segunda linha é truncada no meio, como numa sincronização parcial.
+	data, err := h.beA.Get(ctx, shardData("maquina-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	linhas := strings.SplitAfter(string(data), "\n")
+	if len(linhas) < 2 {
+		t.Fatalf("shard com %d linha(s); o teste precisa de duas", len(linhas))
+	}
+	corrompido := linhas[0] + linhas[1][:len(linhas[1])/2] + "\n"
+	if err := h.beA.Put(ctx, shardData("maquina-a"), []byte(corrompido)); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := PublishMedia(ctx, h.a, h.beA, local, h.now.Add(time.Hour))
+	if err == nil {
+		t.Errorf("PublishMedia aceitou um shard corrompido (res = %+v)", res)
+	}
+	for _, nome := range []string{"um.pdf", "dois.pdf"} {
+		if _, err := h.beA.Get(ctx, export.MediaFile("maquina-a", nome)); err != nil {
+			t.Errorf("%s foi apagado do destino com base num shard lido pela metade: %v", nome, err)
+		}
+		if _, err := os.Stat(filepath.Join(local, nome)); err != nil {
+			t.Errorf("%s foi apagado do disco local: %v", nome, err)
+		}
+	}
+}
