@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/brumarch/wappsync/internal/config"
@@ -37,6 +38,15 @@ func docMsg(mime, fileName string, length uint64) *waE2E.Message {
 		DirectPath: proto.String("/v/t62/def"),
 		MediaKey:   []byte("chave"),
 	}}
+}
+
+// evtOf embrulha um protobuf no evento que o whatsmeow entregaria, passando
+// pelo MESMO UnwrapRaw que ele aplica antes de despachar. É o que garante que
+// os testes de mediaJobFor vejam a mensagem no formato de produção — montar o
+// evento à mão, com Message já preenchido, foi o que escondeu o defeito do
+// "ver uma vez".
+func evtOf(raw *waE2E.Message) *events.Message {
+	return (&events.Message{RawMessage: raw}).UnwrapRaw()
 }
 
 func TestExtForMime(t *testing.T) {
@@ -142,6 +152,77 @@ func TestViewOnceIsNeverDownloaded(t *testing.T) {
 			// O conteúdo continua descrito: o resumo não perde a mensagem,
 			// só o arquivo.
 			if body := Describe(msg).Body; body == "" {
+				t.Error("a mensagem sumiu do texto; era só o arquivo que não podia ir")
+			}
+		})
+	}
+}
+
+// Trava, e a que vale em produção. O whatsmeow despacha o evento com Message
+// JÁ sem o invólucro de "ver uma vez" e a marca em IsViewOnce; a trava acima,
+// sozinha, passava enquanto o arquivo era baixado. Aqui a mensagem percorre o
+// mesmo UnwrapRaw e chega a mediaJobFor com tudo liberado no config: a única
+// coisa que pode barrar o download é a recusa de "ver uma vez".
+func TestViewOnceIsNeverDownloadedFromEvent(t *testing.T) {
+	viewOnceImg := imageMsg("image/jpeg", 500)
+	viewOnceImg.ImageMessage.ViewOnce = proto.Bool(true)
+	viewOnceAudio := audioMsg("audio/ogg", 10, 500, true)
+	viewOnceAudio.AudioMessage.ViewOnce = proto.Bool(true)
+
+	cases := map[string]*waE2E.Message{
+		"ViewOnceMessage": {ViewOnceMessage: &waE2E.FutureProofMessage{
+			Message: imageMsg("image/jpeg", 500),
+		}},
+		"ViewOnceMessageV2": {ViewOnceMessageV2: &waE2E.FutureProofMessage{
+			Message: imageMsg("image/jpeg", 500),
+		}},
+		"ViewOnceMessageV2Extension": {ViewOnceMessageV2Extension: &waE2E.FutureProofMessage{
+			Message: audioMsg("audio/ogg", 10, 500, true),
+		}},
+		"enviada por outro aparelho meu": {DeviceSentMessage: &waE2E.DeviceSentMessage{
+			Message: &waE2E.Message{ViewOnceMessageV2: &waE2E.FutureProofMessage{
+				Message: imageMsg("image/jpeg", 500),
+			}},
+		}},
+		"dentro de efêmera": {EphemeralMessage: &waE2E.FutureProofMessage{
+			Message: &waE2E.Message{ViewOnceMessage: &waE2E.FutureProofMessage{
+				Message: docMsg("application/pdf", "x.pdf", 500),
+			}},
+		}},
+		// Sem invólucro nenhum: só a marca da própria mídia.
+		"imagem com viewOnce próprio": viewOnceImg,
+		"áudio com viewOnce próprio":  viewOnceAudio,
+	}
+
+	c := testClient(func(cfg *config.Config) {
+		cfg.Media = config.Media{
+			Enabled: true, MaxFileMB: 20,
+			Kinds: []string{"image", "document", config.KindAudio},
+		}
+		cfg.Transcribe.MaxSeconds = 600
+	})
+	c.transcriber = &fakeTranscriber{}
+	m := msgstore.Message{ID: "M1", ChatJID: "g@g.us", Timestamp: time.Now()}
+
+	// Controle: sem "ver uma vez", este mesmo cliente baixa os três tipos.
+	// Sem isto o teste passaria também com o download recusado por outro motivo.
+	for name, msg := range map[string]*waE2E.Message{
+		"imagem":    imageMsg("image/jpeg", 500),
+		"documento": docMsg("application/pdf", "x.pdf", 500),
+		"áudio":     audioMsg("audio/ogg", 10, 500, true),
+	} {
+		if _, ok := c.mediaJobFor(m, evtOf(msg), "Família"); !ok {
+			t.Fatalf("controle: %s comum deveria ser baixável neste config", name)
+		}
+	}
+
+	for name, msg := range cases {
+		t.Run(name, func(t *testing.T) {
+			evt := evtOf(msg)
+			if _, ok := c.mediaJobFor(m, evt, "Família"); ok {
+				t.Error("anexo de 'ver uma vez' virou job de download")
+			}
+			if body := Describe(evt.Message).Body; body == "" {
 				t.Error("a mensagem sumiu do texto; era só o arquivo que não podia ir")
 			}
 		})
@@ -260,7 +341,7 @@ func TestMediaJobFor(t *testing.T) {
 			c.setName(famJID, "Família")
 
 			m := msgstore.Message{ID: "M1", ChatJID: famJID, Timestamp: time.Now()}
-			job, ok := c.mediaJobFor(m, tc.msg, "Família")
+			job, ok := c.mediaJobFor(m, evtOf(tc.msg), "Família")
 			if ok != tc.want {
 				t.Fatalf("mediaJobFor = %v, queria %v", ok, tc.want)
 			}
@@ -283,7 +364,7 @@ func TestMediaJobNeedsIdentifiedMessage(t *testing.T) {
 		{ID: "", ChatJID: "g@g.us"},
 		{ID: "M1", ChatJID: ""},
 	} {
-		if _, ok := c.mediaJobFor(m, imageMsg("image/jpeg", 100), "Família"); ok {
+		if _, ok := c.mediaJobFor(m, evtOf(imageMsg("image/jpeg", 100)), "Família"); ok {
 			t.Errorf("job criado para mensagem sem chave: %+v", m)
 		}
 	}
@@ -357,7 +438,7 @@ func TestChatNameFallsBackToDatabase(t *testing.T) {
 
 	// E com o nome resolvido, o anexo passa a ser baixado.
 	m := msgstore.Message{ID: "M1", ChatJID: jid, Timestamp: time.Now()}
-	if _, ok := c.mediaJobFor(m, imageMsg("image/jpeg", 1000), c.chatName(ctx, jid)); !ok {
+	if _, ok := c.mediaJobFor(m, evtOf(imageMsg("image/jpeg", 1000)), c.chatName(ctx, jid)); !ok {
 		t.Error("anexo continua sendo pulado mesmo com o nome no banco")
 	}
 
@@ -377,7 +458,7 @@ func TestJIDMatchWorksWithoutName(t *testing.T) {
 	})
 
 	m := msgstore.Message{ID: "M1", ChatJID: jid, Timestamp: time.Now()}
-	if _, ok := c.mediaJobFor(m, imageMsg("image/jpeg", 1000), ""); !ok {
+	if _, ok := c.mediaJobFor(m, evtOf(imageMsg("image/jpeg", 1000)), ""); !ok {
 		t.Error("match por JID exato falhou com o nome desconhecido")
 	}
 }
