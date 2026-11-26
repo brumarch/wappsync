@@ -15,7 +15,6 @@ import (
 
 	"github.com/brumarch/wappsync/internal/config"
 	"github.com/brumarch/wappsync/internal/store"
-	"github.com/brumarch/wappsync/internal/wa"
 )
 
 // setupChat é uma conversa como o assistente a apresenta: o nome é para a
@@ -90,17 +89,11 @@ func cmdSetup(ctx context.Context, cfg *config.Config, verbose bool) error {
 	quiet.Media.Enabled = false
 	quiet.Transcribe.Enabled = false
 
-	db, err := openDB(&quiet)
+	db, client, closeSession, err := openSession(ctx, &quiet, verbose)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-
-	client, err := wa.New(ctx, &quiet, db, verbose)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
+	defer closeSession()
 
 	if !client.IsPaired() {
 		return errors.New("esta máquina não está pareada; rode `wappsync login` antes do setup")

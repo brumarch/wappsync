@@ -172,25 +172,39 @@ func openDB(cfg *config.Config) (*store.DB, error) {
 	return store.Open(cfg.MessagesDBPath())
 }
 
+// openSession abre o banco local e, sobre ele, a sessão do WhatsApp (sem
+// conectar). O close devolvido desfaz os dois na ordem inversa, e a ordem
+// importa: o Client tem workers que escrevem no banco até o seu Close voltar.
+func openSession(ctx context.Context, cfg *config.Config, verbose bool) (*store.DB, *wa.Client, func(), error) {
+	db, err := openDB(cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	client, err := wa.New(ctx, cfg, db, verbose)
+	if err != nil {
+		db.Close()
+		return nil, nil, nil, err
+	}
+	return db, client, func() {
+		client.Close()
+		db.Close()
+	}, nil
+}
+
 // --------------------------------------------------------------- comandos ---
 
 func cmdLogin(ctx context.Context, cfg *config.Config, verbose bool, phone string, fullHistory bool) error {
-	db, err := openDB(cfg)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
+	// Antes de abrir a sessão: a opção só vale para um cliente ainda não criado.
 	if fullHistory {
 		wa.SetFullSync(true)
 		fmt.Println("Pedindo histórico completo — o primeiro sync pode demorar e ocupar bastante espaço.")
 	}
 
-	client, err := wa.New(ctx, cfg, db, verbose)
+	db, client, closeSession, err := openSession(ctx, cfg, verbose)
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	defer closeSession()
 
 	if err := client.Login(ctx, phone); err != nil {
 		return err
@@ -208,17 +222,11 @@ func cmdLogin(ctx context.Context, cfg *config.Config, verbose bool, phone strin
 }
 
 func cmdLogout(ctx context.Context, cfg *config.Config, verbose bool, yes bool) error {
-	db, err := openDB(cfg)
+	_, client, closeSession, err := openSession(ctx, cfg, verbose)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-
-	client, err := wa.New(ctx, cfg, db, verbose)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
+	defer closeSession()
 
 	if !client.IsPaired() {
 		fmt.Println("Esta máquina não está pareada.")
@@ -243,17 +251,11 @@ func cmdLogout(ctx context.Context, cfg *config.Config, verbose bool, yes bool) 
 }
 
 func cmdRun(ctx context.Context, cfg *config.Config, verbose, once bool) error {
-	db, err := openDB(cfg)
+	db, client, closeSession, err := openSession(ctx, cfg, verbose)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-
-	client, err := wa.New(ctx, cfg, db, verbose)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
+	defer closeSession()
 
 	if err := client.Connect(ctx); err != nil {
 		return err
@@ -501,17 +503,11 @@ func cmdStatus(ctx context.Context, cfg *config.Config, verbose bool) error {
 }
 
 func cmdGroups(ctx context.Context, cfg *config.Config, verbose bool) error {
-	db, err := openDB(cfg)
+	_, client, closeSession, err := openSession(ctx, cfg, verbose)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-
-	client, err := wa.New(ctx, cfg, db, verbose)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
+	defer closeSession()
 
 	if err := client.Connect(ctx); err != nil {
 		return err
