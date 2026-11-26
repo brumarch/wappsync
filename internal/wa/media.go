@@ -289,23 +289,36 @@ func (c *Client) startMediaWorker() {
 	if !c.cfg.Media.Enabled {
 		return
 	}
-	c.mediaQ = make(chan mediaJob, 256)
+	// O worker lê de uma variável local: c.mediaQ volta a nil no encerramento,
+	// e é só por ela que os produtores sabem que a fila fechou.
+	q := make(chan mediaJob, 256)
+	c.mediaQ = q
 	c.mediaDone = make(chan struct{})
 	go func() {
 		defer close(c.mediaDone)
-		for job := range c.mediaQ {
+		for job := range q {
 			c.fetchMedia(job)
 		}
 	}()
 }
 
+// stopMediaWorker fecha a fila e espera o que já estava nela terminar.
+//
+// O campo vira nil ANTES do close, sob a trava de escrita: quando o close
+// acontece, nenhum queueMediaJob está no meio de um envio e nenhum outro vai
+// enxergar o canal. A espera fica fora da trava para que um download demorado
+// não segure o handler de eventos — ele só descarta o anexo e segue.
 func (c *Client) stopMediaWorker() {
-	if c.mediaQ == nil {
+	c.mediaMu.Lock()
+	q := c.mediaQ
+	c.mediaQ = nil
+	c.mediaMu.Unlock()
+
+	if q == nil {
 		return
 	}
-	close(c.mediaQ)
+	close(q)
 	<-c.mediaDone
-	c.mediaQ = nil
 }
 
 // queueMediaJob enfileira sem nunca bloquear quem chamou.
@@ -314,6 +327,8 @@ func (c *Client) stopMediaWorker() {
 // marcador continua lá, então o que se perde é o arquivo. Bloquear aqui
 // pararia a captura inteira, que é um estrago bem maior.
 func (c *Client) queueMediaJob(job mediaJob) {
+	c.mediaMu.RLock()
+	defer c.mediaMu.RUnlock()
 	if c.mediaQ == nil {
 		return
 	}

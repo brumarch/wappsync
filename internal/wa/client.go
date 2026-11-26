@@ -44,7 +44,13 @@ type Client struct {
 	lost chan SessionLoss
 
 	// Fila de anexos. nil quando [media].enabled está desligado — e é o nil
-	// que faz enqueueMedia virar no-op, sem espalhar o if pelo código.
+	// que faz queueMediaJob virar no-op, sem espalhar o if pelo código.
+	//
+	// mediaMu existe porque quem enfileira são as goroutines do whatsmeow, e
+	// elas continuam entregando eventos enquanto o Close esvazia a fila: sem a
+	// trava, um anexo que chegasse nesse intervalo era enviado para um canal
+	// já fechado.
+	mediaMu   sync.RWMutex
 	mediaQ    chan mediaJob
 	mediaDone chan struct{}
 

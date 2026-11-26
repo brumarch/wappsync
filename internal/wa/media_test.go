@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -460,5 +461,48 @@ func TestJIDMatchWorksWithoutName(t *testing.T) {
 	m := msgstore.Message{ID: "M1", ChatJID: jid, Timestamp: time.Now()}
 	if _, ok := c.mediaJobFor(m, evtOf(imageMsg("image/jpeg", 1000)), ""); !ok {
 		t.Error("match por JID exato falhou com o nome desconhecido")
+	}
+}
+
+// O Close esvazia a fila de anexos ANTES de desconectar, e nesse intervalo as
+// goroutines do whatsmeow continuam entregando eventos. Enfileirar durante o
+// encerramento tem que virar descarte silencioso — sem a trava em mediaMu era
+// envio para canal fechado (panic) e leitura concorrente de c.mediaQ.
+//
+// A corrida em si só é vista com -race, que roda na CI; o panic aparece
+// também sem ele, na maioria das execuções.
+func TestQueueMediaJobDuringCloseIsDropped(t *testing.T) {
+	for rodada := 0; rodada < 50; rodada++ {
+		c := testClient(func(cfg *config.Config) {
+			cfg.Media = config.Media{Enabled: true, MaxFileMB: 1}
+		})
+		c.startMediaWorker()
+
+		// Source sem DirectPath: o Download recusa na hora, sem rede, e o
+		// worker segue para o próximo job.
+		job := mediaJob{chatJID: "g@g.us", msgID: "M1", att: attachment{
+			Kind: "image", Ext: ".jpg", Source: &waE2E.ImageMessage{},
+		}}
+
+		var wg sync.WaitGroup
+		largada := make(chan struct{})
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-largada
+				for j := 0; j < 200; j++ {
+					c.queueMediaJob(job)
+				}
+			}()
+		}
+		close(largada)
+		c.stopMediaWorker()
+		wg.Wait()
+
+		// Depois de fechada, a fila continua sendo um no-op seguro, e fechar
+		// de novo também (Close pode ser chamado mais de uma vez).
+		c.queueMediaJob(job)
+		c.stopMediaWorker()
 	}
 }
