@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
@@ -248,7 +249,20 @@ func TestNewCallsEnforceReadOnly(t *testing.T) {
 // Os testes acima travam o NOSSO lado permanentemente, mas não o comportamento
 // interno da biblioteca — uma versão nova pode introduzir envio automático.
 // Por isso um bump só passa depois de reauditar enforceReadOnly.
-const auditedWhatsmeowVersion = "v0.0.0-20260828224850-0fadda796019"
+//
+// Auditoria de 20260828 -> 20261126 (diff inteiro fora de proto/):
+//   - nenhum método exportado novo em *Client, logo forbiddenMethods segue
+//     completa; SendPresence continua sem chamador interno;
+//   - envio novo: telemetria `unified_session` a cada conexão, opt-in por
+//     UnifiedSessionInterval — enforceReadOnly passou a fixá-lo em zero;
+//   - o pedido de mensagem "indisponível" ao próprio celular, antes
+//     incondicional, passou a obedecer AutomaticMessageRerequestFromPhone
+//     (que já era false aqui). Fecha um envio que existia; o custo é não
+//     recuperar mais essas mensagens;
+//   - a stanza "status" agora passa pelo caminho cifrado: falha de decriptação
+//     de um status gera retry receipt, o mesmo já emitido para mensagens;
+//   - retry receipt, recibo de entrega, prekeys e SetPassive: sem mudança.
+const auditedWhatsmeowVersion = "v0.0.0-20261126154439-c2ce5c339ae0"
 
 var whatsmeowRequire = regexp.MustCompile(`(?m)^\s*go\.mau\.fi/whatsmeow\s+(\S+)`)
 
@@ -278,7 +292,14 @@ Depois ajuste enforceReadOnly se necessário e atualize a constante.`,
 // A postura somente-leitura tem que valer em comportamento, não só em intenção:
 // o cliente precisa recusar qualquer pedido de reenvio.
 func TestEnforceReadOnlyRefusesResends(t *testing.T) {
-	cli := &whatsmeow.Client{}
+	// Parte de um cliente com tudo LIGADO: com o zero value, os campos que
+	// enforceReadOnly desliga já nasceriam desligados e a remoção de qualquer
+	// uma daquelas linhas passaria despercebida.
+	cli := &whatsmeow.Client{
+		UseRetryMessageStore:               true,
+		AutomaticMessageRerequestFromPhone: true,
+		UnifiedSessionInterval:             time.Hour,
+	}
 	enforceReadOnly(cli)
 
 	if cli.UseRetryMessageStore {
@@ -286,6 +307,9 @@ func TestEnforceReadOnlyRefusesResends(t *testing.T) {
 	}
 	if cli.AutomaticMessageRerequestFromPhone {
 		t.Error("AutomaticMessageRerequestFromPhone ligado: pediria mensagens ao celular")
+	}
+	if cli.UnifiedSessionInterval != 0 {
+		t.Error("UnifiedSessionInterval ligado: mandaria telemetria de sessão a cada conexão")
 	}
 	if cli.GetMessageForRetry == nil {
 		t.Fatal("GetMessageForRetry não foi definido")

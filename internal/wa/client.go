@@ -120,9 +120,10 @@ func New(ctx context.Context, cfg *config.Config, db *msgstore.DB, verbose bool)
 // enforceReadOnly fixa a postura somente-leitura do cliente.
 //
 // Nenhum caminho deste programa chama SendMessage, MarkRead, SendPresence ou
-// qualquer mutação de grupo — isso é verificado por TestClientIsReadOnly. O que
-// esta função cobre é a única forma de o whatsmeow enviar uma mensagem sem que
-// a peçamos: um retry receipt de outro aparelho pedindo o reenvio de algo.
+// qualquer mutação de grupo — isso é verificado por
+// TestClientCallsAreAllowlisted e TestNoWriteAPIAnywhere. O que esta função
+// cobre é a única forma de o whatsmeow enviar uma mensagem sem que a peçamos:
+// um retry receipt de outro aparelho pedindo o reenvio de algo.
 //
 // Na prática esse caminho já morre sozinho (nunca enviamos nada, logo não há
 // mensagem em cache para reenviar), mas depender de um default é frágil.
@@ -141,8 +142,17 @@ func enforceReadOnly(cli *whatsmeow.Client) {
 		return false
 	}
 
-	// Não pedir ao celular o reenvio de mensagens que falharam ao decriptar.
+	// Não pedir ao celular o reenvio de mensagens que falharam ao decriptar
+	// nem das que chegam como "indisponíveis". Até a versão de 2026-08 o
+	// whatsmeow ignorava este campo no segundo caso e mandava o pedido assim
+	// mesmo (uma peer message para o nosso próprio celular); desde 2026-11 o
+	// campo vale para os dois, e a recusa passou a ser completa.
 	cli.AutomaticMessageRerequestFromPhone = false
+
+	// Não mandar telemetria de sessão (`unified_session`) a cada conexão. O
+	// envio é opt-in por este campo e o zero já o desliga; fica explícito pelo
+	// mesmo motivo dos demais: sobreviver a uma troca de default.
+	cli.UnifiedSessionInterval = 0
 }
 
 func (c *Client) Close() {
@@ -322,7 +332,7 @@ func (c *Client) ingest(ctx context.Context, evt *events.Message, source string)
 	// Depois de gravar, nunca antes: o download termina num SetMedia, que não
 	// acha linha nenhuma se a mensagem ainda não existe — e o arquivo baixado
 	// viraria órfão na pasta.
-	if job, ok := c.mediaJobFor(m, evt.Message, c.chatName(ctx, m.ChatJID)); ok {
+	if job, ok := c.mediaJobFor(m, evt, c.chatName(ctx, m.ChatJID)); ok {
 		c.queueMediaJob(job)
 	}
 	_ = c.db.UpsertChat(ctx, msgstore.Chat{
@@ -466,7 +476,7 @@ func (c *Client) collectHistory(data *waHistorySync.HistorySync, parse parseWebF
 			}
 			batch = append(batch, m)
 			// O nome desta conversa foi gravado logo acima, antes do laço.
-			if job, ok := c.mediaJobFor(m, parsed.Message, c.getName(chatJID.String())); ok {
+			if job, ok := c.mediaJobFor(m, parsed, c.getName(chatJID.String())); ok {
 				pending = append(pending, job)
 			}
 			if m.Timestamp.After(lastTS) {

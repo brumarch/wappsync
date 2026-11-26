@@ -110,6 +110,12 @@ func unwrapOnce(msg *waE2E.Message) *waE2E.Message {
 		msg.GetDocumentWithCaptionMessage(),
 		msg.GetGroupMentionedMessage(),
 		msg.GetLottieStickerMessage(),
+		// Os três abaixo entraram para acompanhar o UnwrapRaw do whatsmeow.
+		// No evento principal ele já os descasca; aqui cobrem a mensagem
+		// citada, que chega crua dentro do ContextInfo.
+		msg.GetSpoilerMessage(),
+		msg.GetAudioStickerMessage(),
+		msg.GetBotInvokeMessage(),
 	} {
 		if wrapped.GetMessage() != nil {
 			return wrapped.GetMessage()

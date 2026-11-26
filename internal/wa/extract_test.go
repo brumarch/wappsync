@@ -241,6 +241,9 @@ func TestDescribeUnwrapsWrappers(t *testing.T) {
 		"view once v2":     {ViewOnceMessageV2: &waE2E.FutureProofMessage{Message: inner}},
 		"doc com legenda":  {DocumentWithCaptionMessage: &waE2E.FutureProofMessage{Message: inner}},
 		"grupo mencionado": {GroupMentionedMessage: &waE2E.FutureProofMessage{Message: inner}},
+		"spoiler":          {SpoilerMessage: &waE2E.FutureProofMessage{Message: inner}},
+		"figurinha sonora": {AudioStickerMessage: &waE2E.FutureProofMessage{Message: inner}},
+		"invocação de bot": {BotInvokeMessage: &waE2E.FutureProofMessage{Message: inner}},
 		"device sent":      {DeviceSentMessage: &waE2E.DeviceSentMessage{Message: inner}},
 	}
 
